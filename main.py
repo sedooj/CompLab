@@ -1,15 +1,3 @@
-"""
-Компилятор — кроссплатформенное GUI-приложение для лабораторной работы
-«Языковой процессор».
-
-Полноценный интерфейс с:
- - вкладками редактирования и результатов,
- - нумерацией строк, подсветкой синтаксиса,
- - интернационализацией (RU/EN),
- - Drag & Drop, таблицей ошибок, горячими клавишами,
- - масштабированием шрифта и строкой состояния.
-"""
-
 import os
 import sys
 
@@ -60,11 +48,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
-
-
-
-
 
 
 TRANSLATIONS = {
@@ -293,16 +276,10 @@ _current_lang = "ru"
 
 
 def tr(key: str) -> str:
-    """Возвращает перевод строки по ключу для текущего языка."""
     return TRANSLATIONS.get(_current_lang, TRANSLATIONS["ru"]).get(key, key)
 
 
-
-
-
-
-class PascalHighlighter(QSyntaxHighlighter):
-    """QSyntaxHighlighter для учебного Pascal-подобного синтаксиса."""
+class CodeHighlighter(QSyntaxHighlighter):
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -310,7 +287,6 @@ class PascalHighlighter(QSyntaxHighlighter):
         self._build_rules()
 
     def _build_rules(self) -> None:
-
         kw_fmt = QTextCharFormat()
         kw_fmt.setForeground(QColor("#eb6b34"))
         kw_fmt.setFontWeight(QFont.Weight.Bold)
@@ -376,13 +352,7 @@ class PascalHighlighter(QSyntaxHighlighter):
                 self.setFormat(m.capturedStart(), m.capturedLength(), fmt)
 
 
-
-
-
-
 class LineNumberArea(QWidget):
-    """Виджет-боковик для отображения номеров строк рядом с CodeEditor."""
-
     def __init__(self, editor: "CodeEditor") -> None:
         super().__init__(editor)
         self._editor = editor
@@ -394,20 +364,13 @@ class LineNumberArea(QWidget):
         self._editor.line_number_area_paint_event(event)
 
 
-
-
-
-
 class CodeEditor(QPlainTextEdit):
-    """Текстовый редактор с нумерацией строк и подсветкой синтаксиса."""
-
-
     file_dropped = pyqtSignal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.line_number_area = LineNumberArea(self)
-        self.highlighter = PascalHighlighter(self.document())
+        self.highlighter = CodeHighlighter(self.document())
 
         self.blockCountChanged.connect(self._update_line_number_area_width)
         self.updateRequest.connect(self._update_line_number_area)
@@ -494,7 +457,6 @@ class CodeEditor(QPlainTextEdit):
             super().dropEvent(event)
 
     def set_font_size(self, size: int) -> None:
-        """Устанавливает размер шрифта редактора."""
         font = self.font()
         font.setPointSize(size)
         self.setFont(font)
@@ -506,8 +468,6 @@ class CodeEditor(QPlainTextEdit):
 
 
 class TabData:
-    """Хранит состояние одной вкладки редактора."""
-
     def __init__(
         self, editor: CodeEditor, file_path: str | None = None
     ) -> None:
@@ -521,8 +481,6 @@ class TabData:
 
 
 class DoubleClickTabBar(QTabBar):
-    """QTabBar, испускающий сигнал при двойном клике по пустой области."""
-
     double_clicked_empty = pyqtSignal()
 
     def mouseDoubleClickEvent(self, event) -> None:
@@ -537,8 +495,6 @@ class DoubleClickTabBar(QTabBar):
 
 
 class HelpDialog(QDialog):
-    """Окно справки."""
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("help_title"))
@@ -560,8 +516,6 @@ class HelpDialog(QDialog):
 
 
 class AboutDialog(QDialog):
-    """Окно «О программе»."""
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("about_title"))
@@ -595,8 +549,6 @@ class AboutDialog(QDialog):
 
 
 class ResultTabWidget(QTabWidget):
-    """Область результатов с тремя фиксированными вкладками."""
-
     error_double_clicked = pyqtSignal(int, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -633,7 +585,6 @@ class ResultTabWidget(QTabWidget):
 
 
     def retranslate(self) -> None:
-        """Обновляет надписи при смене языка."""
         self.setTabText(0, tr("errors_tab"))
         self.setTabText(1, tr("output_tab"))
         self.setTabText(2, tr("log_tab"))
@@ -642,7 +593,6 @@ class ResultTabWidget(QTabWidget):
     def add_error(
         self, line: int, column: int, error_type: str, description: str
     ) -> None:
-        """Добавляет строку ошибки в таблицу."""
         row = self.error_table.rowCount()
         self.error_table.insertRow(row)
         self.error_table.setItem(row, 0, QTableWidgetItem(str(line)))
@@ -651,11 +601,9 @@ class ResultTabWidget(QTabWidget):
         self.error_table.setItem(row, 3, QTableWidgetItem(description))
 
     def clear_errors(self) -> None:
-        """Очищает таблицу ошибок."""
         self.error_table.setRowCount(0)
 
     def set_font_size(self, size: int) -> None:
-        """Устанавливает размер шрифта для виджетов результатов."""
         for widget in (self.output_text, self.log_text):
             f = widget.font()
             f.setPointSize(size)
@@ -697,17 +645,12 @@ class ResultTabWidget(QTabWidget):
 
 
 class CompilerWindow(QMainWindow):
-    """Главное окно приложения «Компилятор»."""
-
     DEFAULT_WIDTH = 1100
     DEFAULT_HEIGHT = 700
     DEFAULT_FONT_SIZE = 12
     MIN_FONT_SIZE = 6
     MAX_FONT_SIZE = 72
     _tab_counter = 0
-
-
-
 
 
     def __init__(self) -> None:
@@ -1108,9 +1051,6 @@ class CompilerWindow(QMainWindow):
         )
 
 
-
-
-
     def _current_editor(self) -> CodeEditor | None:
         w = self.tab_widget.currentWidget()
         return w if isinstance(w, CodeEditor) else None
@@ -1243,24 +1183,17 @@ class CompilerWindow(QMainWindow):
         self._update_status_bar()
 
     def log(self, message: str) -> None:
-        """Вывести сообщение во вкладку «Вывод»."""
         self.result_tabs.output_text.appendPlainText(message)
 
     def log_debug(self, message: str) -> None:
-        """Вывести сообщение во вкладку «Лог»."""
         self.result_tabs.log_text.appendPlainText(message)
 
 
-
-
-
     def on_file_new(self) -> None:
-        """Создать новую вкладку."""
         self._add_new_tab()
         self.statusBar().showMessage(tr("new_doc"))
 
     def on_file_open(self) -> None:
-        """Открыть файл(ы) в новых вкладках."""
         paths, _ = QFileDialog.getOpenFileNames(
             self, tr("open_file_title"), "", tr("file_filters")
         )
@@ -1326,9 +1259,6 @@ class CompilerWindow(QMainWindow):
         self._update_title()
         self._update_status_bar()
         self.statusBar().showMessage(f"{tr('saved')}: {path}")
-
-
-
 
 
     def on_edit_undo(self) -> None:
@@ -1446,7 +1376,6 @@ class CompilerWindow(QMainWindow):
         self.statusBar().showMessage(tr("analyzer_stub"))
 
     def _on_error_go_to(self, line: int, col: int) -> None:
-        """Переход к строке/столбцу ошибки в редакторе."""
         editor = self._current_editor()
         if not editor:
             return
