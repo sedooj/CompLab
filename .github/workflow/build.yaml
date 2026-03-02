@@ -17,7 +17,7 @@ jobs:
           # если есть другие зависимости, добавьте их
       - name: Build with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --name "Compiler" main.py
+          pyinstaller --onefile --windowed --name "Compiler" --icon=images/favicon.ico main.py
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
