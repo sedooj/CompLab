@@ -1,6 +1,8 @@
 import os
 import sys
 
+from lexical_analyzer import Lexeme, LexicalAnalyzer
+
 from PyQt6.QtCore import (
     QMimeData,
     QRect,
@@ -107,18 +109,30 @@ TRANSLATIONS = {
             "или откройте файл (Ctrl+O)"
         ),
         "untitled": "Безымянный",
-        "errors_tab": "Ошибки",
+        "errors_tab": "Лексемы",
         "output_tab": "Вывод",
         "log_tab": "Лог",
+        "col_code": "Условный код",
+        "col_lexeme_type": "Тип лексемы",
+        "col_lexeme": "Лексема",
+        "col_location": "Местоположение",
         "col_line": "Строка",
         "col_column": "Столбец",
         "col_type": "Тип ошибки",
         "col_description": "Описание",
+        "location_format": "строка {line}, {start}-{end}",
         "status_line": "Стр: {line}",
         "status_col": "Кол: {col}",
         "status_lines_total": "Строк: {n}",
         "status_modified": "Изменён",
         "status_font_size": "Шрифт: {size}pt",
+        "run_no_active_editor": "Нет активной вкладки для анализа.",
+        "run_summary": (
+            "Распознано лексем: {tokens}. "
+            "Ошибок: {errors}. Строк: {lines}, символов: {chars}."
+        ),
+        "run_done_ok": "Лексический анализ завершен без ошибок",
+        "run_done_with_errors": "Лексический анализ завершен. Ошибок: {errors}",
         "analyzer_stub": (
             "[Пуск] Анализатор (заглушка) — демонстрационные ошибки добавлены."
         ),
@@ -217,18 +231,30 @@ TRANSLATIONS = {
             "or open a file (Ctrl+O)"
         ),
         "untitled": "Untitled",
-        "errors_tab": "Errors",
+        "errors_tab": "Lexemes",
         "output_tab": "Output",
         "log_tab": "Log",
+        "col_code": "Token Code",
+        "col_lexeme_type": "Token Type",
+        "col_lexeme": "Lexeme",
+        "col_location": "Location",
         "col_line": "Line",
         "col_column": "Column",
         "col_type": "Error Type",
         "col_description": "Description",
+        "location_format": "line {line}, {start}-{end}",
         "status_line": "Ln: {line}",
         "status_col": "Col: {col}",
         "status_lines_total": "Lines: {n}",
         "status_modified": "Modified",
         "status_font_size": "Font: {size}pt",
+        "run_no_active_editor": "No active tab to analyze.",
+        "run_summary": (
+            "Recognized tokens: {tokens}. "
+            "Errors: {errors}. Lines: {lines}, chars: {chars}."
+        ),
+        "run_done_ok": "Lexical analysis completed without errors",
+        "run_done_with_errors": "Lexical analysis completed. Errors: {errors}",
         "analyzer_stub": "[Run] Analyzer (stub) — demo errors added.",
         "search_stub": "Find…",
         "lang_ru": "Русский",
@@ -239,7 +265,7 @@ TRANSLATIONS = {
             "<h2>Compiler</h2>"
             "<p>Version 1.0</p>"
             "<p>Lab work: Language Processor</p>"
-            "<p>Author: Student</p>"
+            "<p>Author: Sergei Gerasimov</p>"
             "<p>© 2026</p>"
         ),
         "help_text": """\
@@ -566,7 +592,7 @@ class ResultTabWidget(QTabWidget):
         self.error_table.horizontalHeader().setStretchLastSection(True)
         self.error_table.verticalHeader().setVisible(False)
         self._update_error_headers()
-        self.error_table.cellDoubleClicked.connect(
+        self.error_table.cellClicked.connect(
             self._on_error_double_click
         )
 
@@ -590,15 +616,26 @@ class ResultTabWidget(QTabWidget):
         self.setTabText(2, tr("log_tab"))
         self._update_error_headers()
 
-    def add_error(
-        self, line: int, column: int, error_type: str, description: str
-    ) -> None:
+    def add_lexeme(self, lexeme: Lexeme) -> None:
         row = self.error_table.rowCount()
         self.error_table.insertRow(row)
-        self.error_table.setItem(row, 0, QTableWidgetItem(str(line)))
-        self.error_table.setItem(row, 1, QTableWidgetItem(str(column)))
-        self.error_table.setItem(row, 2, QTableWidgetItem(error_type))
-        self.error_table.setItem(row, 3, QTableWidgetItem(description))
+
+        code_item = QTableWidgetItem(str(lexeme.code))
+        code_item.setData(Qt.ItemDataRole.UserRole, lexeme.line)
+        code_item.setData(Qt.ItemDataRole.UserRole + 1, lexeme.column_start)
+
+        location = tr("location_format").format(
+            line=lexeme.line,
+            start=lexeme.column_start,
+            end=lexeme.column_end,
+        )
+        if lexeme.is_error and lexeme.error_message:
+            location = f"{location} | {lexeme.error_message}"
+
+        self.error_table.setItem(row, 0, code_item)
+        self.error_table.setItem(row, 1, QTableWidgetItem(lexeme.token_type))
+        self.error_table.setItem(row, 2, QTableWidgetItem(lexeme.lexeme))
+        self.error_table.setItem(row, 3, QTableWidgetItem(location))
 
     def clear_errors(self) -> None:
         self.error_table.setRowCount(0)
@@ -616,10 +653,10 @@ class ResultTabWidget(QTabWidget):
 
     def _update_error_headers(self) -> None:
         self.error_table.setHorizontalHeaderLabels([
-            tr("col_line"),
-            tr("col_column"),
-            tr("col_type"),
-            tr("col_description"),
+            tr("col_code"),
+            tr("col_lexeme_type"),
+            tr("col_lexeme"),
+            tr("col_location"),
         ])
         header = self.error_table.horizontalHeader()
         for i in range(3):
@@ -629,15 +666,14 @@ class ResultTabWidget(QTabWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
     def _on_error_double_click(self, row: int, _col: int) -> None:
-        line_item = self.error_table.item(row, 0)
-        col_item = self.error_table.item(row, 1)
-        if line_item and col_item:
-            try:
-                self.error_double_clicked.emit(
-                    int(line_item.text()), int(col_item.text())
-                )
-            except ValueError:
-                pass
+        code_item = self.error_table.item(row, 0)
+        if not code_item:
+            return
+
+        line = code_item.data(Qt.ItemDataRole.UserRole)
+        col = code_item.data(Qt.ItemDataRole.UserRole + 1)
+        if isinstance(line, int) and isinstance(col, int):
+            self.error_double_clicked.emit(line, col)
 
 
 
@@ -658,6 +694,7 @@ class CompilerWindow(QMainWindow):
         self.setAcceptDrops(True)
         self._font_size = self.DEFAULT_FONT_SIZE
         self._tabs_data: dict[int, TabData] = {}
+        self.lexical_analyzer = LexicalAnalyzer()
 
         self._setup_ui()
 
@@ -880,7 +917,8 @@ class CompilerWindow(QMainWindow):
         self.text_menu.addAction(self.action_source_code)
 
 
-        menu_bar.addAction(self.action_run)
+        self.run_menu = menu_bar.addMenu(tr("run_menu"))
+        self.run_menu.addAction(self.action_run)
 
 
         self.lang_menu = menu_bar.addMenu(tr("language_menu"))
@@ -1348,32 +1386,42 @@ class CompilerWindow(QMainWindow):
     def on_run(self) -> None:
         self.result_tabs.clear_errors()
         self.result_tabs.output_text.clear()
+        self.result_tabs.log_text.clear()
 
         editor = self._current_editor()
         if not editor:
-            self.log(tr("analyzer_stub"))
+            self.log(tr("run_no_active_editor"))
             return
 
         text = editor.toPlainText()
-        self.log(tr("analyzer_stub"))
+        tokens = self.lexical_analyzer.analyze(text)
+        errors = 0
+
+        for token in tokens:
+            self.result_tabs.add_lexeme(token)
+            if token.is_error:
+                errors += 1
+
         self.log(
-            f"Текст содержит {editor.blockCount()} строк, "
-            f"{len(text)} символов."
+            tr("run_summary").format(
+                tokens=len(tokens),
+                errors=errors,
+                lines=editor.blockCount(),
+                chars=len(text),
+            )
         )
-
-
-        self.result_tabs.add_error(
-            1, 1, "Лексическая", "Неопознанный символ '@'"
-        )
-        self.result_tabs.add_error(
-            3, 10, "Синтаксическая", "Ожидался ';' после выражения"
-        )
-        self.result_tabs.add_error(
-            5, 5, "Семантическая", "Переменная 'x' не объявлена"
-        )
+        if errors:
+            self.log_debug(
+                tr("run_done_with_errors").format(errors=errors)
+            )
+            self.statusBar().showMessage(
+                tr("run_done_with_errors").format(errors=errors)
+            )
+        else:
+            self.log_debug(tr("run_done_ok"))
+            self.statusBar().showMessage(tr("run_done_ok"))
 
         self.result_tabs.setCurrentIndex(0)
-        self.statusBar().showMessage(tr("analyzer_stub"))
 
     def _on_error_go_to(self, line: int, col: int) -> None:
         editor = self._current_editor()
