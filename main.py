@@ -136,6 +136,44 @@ TRANSLATIONS = {
         "analyzer_stub": (
             "[Пуск] Анализатор (заглушка) — демонстрационные ошибки добавлены."
         ),
+        "text_task_stub": "[Текст] Постановка задачи — не реализовано",
+        "text_grammar_stub": "[Текст] Грамматика — не реализовано",
+        "text_grammar_class_stub": (
+            "[Текст] Классификация грамматики — не реализовано"
+        ),
+        "text_analysis_method_stub": "[Текст] Метод анализа — не реализовано",
+        "text_test_example_stub": "[Текст] Тестовый пример — не реализовано",
+        "text_references_stub": "[Текст] Список литературы — не реализовано",
+        "text_source_code_stub": "[Текст] Исходный код программы — не реализовано",
+        "token_type_labels": {
+            -1: "лексическая ошибка",
+            1: "ключевое слово val",
+            2: "ключевое слово var",
+            3: "тип Int",
+            4: "идентификатор",
+            5: "двоеточие",
+            6: "открывающая скобка",
+            7: "закрывающая скобка",
+            8: "оператор деления",
+            9: "оператор минус",
+            10: "оператор стрелка",
+            11: "оператор плюс",
+            12: "оператор умножения",
+            13: "оператор присваивания",
+            14: "конец оператора",
+            15: "открывающая фигурная скобка",
+            16: "закрывающая фигурная скобка",
+            17: "запятая",
+            18: "оператор остатка",
+            19: "тип String",
+            20: "тип Double",
+            21: "тип Boolean",
+            22: "тип Float",
+            23: "разделитель (пробел)",
+            24: "целое без знака",
+        },
+        "space_lexeme_label": "(пробел)",
+        "invalid_symbol_template": "Недопустимый символ '{symbol}'",
         "search_stub": "Поиск…",
         "lang_ru": "Русский",
         "lang_en": "English",
@@ -256,6 +294,44 @@ TRANSLATIONS = {
         "run_done_ok": "Lexical analysis completed without errors",
         "run_done_with_errors": "Lexical analysis completed. Errors: {errors}",
         "analyzer_stub": "[Run] Analyzer (stub) — demo errors added.",
+        "text_task_stub": "[Text] Problem statement — not implemented",
+        "text_grammar_stub": "[Text] Grammar — not implemented",
+        "text_grammar_class_stub": (
+            "[Text] Grammar classification — not implemented"
+        ),
+        "text_analysis_method_stub": "[Text] Analysis method — not implemented",
+        "text_test_example_stub": "[Text] Test example — not implemented",
+        "text_references_stub": "[Text] References — not implemented",
+        "text_source_code_stub": "[Text] Source code — not implemented",
+        "token_type_labels": {
+            -1: "lexical error",
+            1: "keyword val",
+            2: "keyword var",
+            3: "type Int",
+            4: "identifier",
+            5: "colon",
+            6: "opening parenthesis",
+            7: "closing parenthesis",
+            8: "division operator",
+            9: "minus operator",
+            10: "arrow operator",
+            11: "plus operator",
+            12: "multiplication operator",
+            13: "assignment operator",
+            14: "statement terminator",
+            15: "opening brace",
+            16: "closing brace",
+            17: "comma",
+            18: "modulo operator",
+            19: "type String",
+            20: "type Double",
+            21: "type Boolean",
+            22: "type Float",
+            23: "separator (space)",
+            24: "unsigned integer",
+        },
+        "space_lexeme_label": "(space)",
+        "invalid_symbol_template": "Invalid symbol '{symbol}'",
         "search_stub": "Find…",
         "lang_ru": "Русский",
         "lang_en": "English",
@@ -303,6 +379,34 @@ _current_lang = "ru"
 
 def tr(key: str) -> str:
     return TRANSLATIONS.get(_current_lang, TRANSLATIONS["ru"]).get(key, key)
+
+
+def tr_value(key: str, default):
+    lang_dict = TRANSLATIONS.get(_current_lang, TRANSLATIONS["ru"])
+    if key in lang_dict:
+        return lang_dict[key]
+    return TRANSLATIONS["ru"].get(key, default)
+
+
+def token_type_label(code: int, is_error: bool) -> str:
+    labels = tr_value("token_type_labels", {})
+    if not isinstance(labels, dict):
+        labels = {}
+    if is_error:
+        return labels.get(-1, "lexical error")
+    return labels.get(code, str(code))
+
+
+def space_lexeme_label() -> str:
+    return tr_value("space_lexeme_label", "(space)")
+
+
+def invalid_symbol_message(symbol: str) -> str:
+    template = tr_value(
+        "invalid_symbol_template",
+        "Invalid symbol '{symbol}'",
+    )
+    return template.format(symbol=symbol)
 
 
 class CodeHighlighter(QSyntaxHighlighter):
@@ -629,12 +733,22 @@ class ResultTabWidget(QTabWidget):
             start=lexeme.column_start,
             end=lexeme.column_end,
         )
-        if lexeme.is_error and lexeme.error_message:
-            location = f"{location} | {lexeme.error_message}"
+        if lexeme.is_error:
+            location = (
+                f"{location} | {invalid_symbol_message(lexeme.lexeme)}"
+            )
+
+        shown_lexeme = lexeme.lexeme
+        if lexeme.code == 23:
+            shown_lexeme = space_lexeme_label()
 
         self.error_table.setItem(row, 0, code_item)
-        self.error_table.setItem(row, 1, QTableWidgetItem(lexeme.token_type))
-        self.error_table.setItem(row, 2, QTableWidgetItem(lexeme.lexeme))
+        self.error_table.setItem(
+            row,
+            1,
+            QTableWidgetItem(token_type_label(lexeme.code, lexeme.is_error)),
+        )
+        self.error_table.setItem(row, 2, QTableWidgetItem(shown_lexeme))
         self.error_table.setItem(row, 3, QTableWidgetItem(location))
 
     def clear_errors(self) -> None:
@@ -689,12 +803,24 @@ class CompilerWindow(QMainWindow):
     _tab_counter = 0
 
 
+    def _format_tr(self, key: str, **kwargs) -> str:
+        text = tr(key)
+        return text.format(**kwargs) if kwargs else text
+
+
     def __init__(self) -> None:
         super().__init__()
         self.setAcceptDrops(True)
         self._font_size = self.DEFAULT_FONT_SIZE
         self._tabs_data: dict[int, TabData] = {}
         self.lexical_analyzer = LexicalAnalyzer()
+        self._has_run_result = False
+        self._last_run_tokens: list[Lexeme] = []
+        self._last_run_errors = 0
+        self._last_run_lines = 0
+        self._last_run_chars = 0
+        self._output_history: list[tuple[str, str, dict]] = []
+        self._log_history: list[tuple[str, str, dict]] = []
 
         self._setup_ui()
 
@@ -1221,10 +1347,80 @@ class CompilerWindow(QMainWindow):
         self._update_status_bar()
 
     def log(self, message: str) -> None:
+        self._output_history.append(("raw", message, {}))
         self.result_tabs.output_text.appendPlainText(message)
 
     def log_debug(self, message: str) -> None:
+        self._log_history.append(("raw", message, {}))
         self.result_tabs.log_text.appendPlainText(message)
+
+    def log_tr(self, key: str, **kwargs) -> None:
+        self._output_history.append(("tr", key, dict(kwargs)))
+        self.result_tabs.output_text.appendPlainText(
+            self._format_tr(key, **kwargs)
+        )
+
+    def log_debug_tr(self, key: str, **kwargs) -> None:
+        self._log_history.append(("tr", key, dict(kwargs)))
+        self.result_tabs.log_text.appendPlainText(
+            self._format_tr(key, **kwargs)
+        )
+
+    def _rerender_message_history(self) -> None:
+        self.result_tabs.output_text.clear()
+        for kind, payload, data in self._output_history:
+            if kind == "tr":
+                self.result_tabs.output_text.appendPlainText(
+                    self._format_tr(payload, **data)
+                )
+            else:
+                self.result_tabs.output_text.appendPlainText(payload)
+
+        self.result_tabs.log_text.clear()
+        for kind, payload, data in self._log_history:
+            if kind == "tr":
+                self.result_tabs.log_text.appendPlainText(
+                    self._format_tr(payload, **data)
+                )
+            else:
+                self.result_tabs.log_text.appendPlainText(payload)
+
+    def _render_run_results(
+        self,
+        update_status: bool = True,
+        focus_results: bool = True,
+    ) -> None:
+        self.result_tabs.clear_errors()
+        self.result_tabs.output_text.clear()
+        self.result_tabs.log_text.clear()
+        self._output_history.clear()
+        self._log_history.clear()
+
+        for token in self._last_run_tokens:
+            self.result_tabs.add_lexeme(token)
+
+        self.log_tr(
+            "run_summary",
+            tokens=len(self._last_run_tokens),
+            errors=self._last_run_errors,
+            lines=self._last_run_lines,
+            chars=self._last_run_chars,
+        )
+
+        if self._last_run_errors:
+            completion_key = "run_done_with_errors"
+            completion_kwargs = {"errors": self._last_run_errors}
+        else:
+            completion_key = "run_done_ok"
+            completion_kwargs = {}
+
+        self.log_debug_tr(completion_key, **completion_kwargs)
+        completion = self._format_tr(completion_key, **completion_kwargs)
+
+        if update_status:
+            self.statusBar().showMessage(completion)
+        if focus_results:
+            self.result_tabs.setCurrentIndex(0)
 
 
     def on_file_new(self) -> None:
@@ -1359,25 +1555,25 @@ class CompilerWindow(QMainWindow):
 
 
     def on_text_task(self) -> None:
-        self.log_debug("[Текст] Постановка задачи — не реализовано")
+        self.log_debug_tr("text_task_stub")
 
     def on_text_grammar(self) -> None:
-        self.log_debug("[Текст] Грамматика — не реализовано")
+        self.log_debug_tr("text_grammar_stub")
 
     def on_text_grammar_class(self) -> None:
-        self.log_debug("[Текст] Классификация грамматики — не реализовано")
+        self.log_debug_tr("text_grammar_class_stub")
 
     def on_text_analysis_method(self) -> None:
-        self.log_debug("[Текст] Метод анализа — не реализовано")
+        self.log_debug_tr("text_analysis_method_stub")
 
     def on_text_test_example(self) -> None:
-        self.log_debug("[Текст] Тестовый пример — не реализовано")
+        self.log_debug_tr("text_test_example_stub")
 
     def on_text_references(self) -> None:
-        self.log_debug("[Текст] Список литературы — не реализовано")
+        self.log_debug_tr("text_references_stub")
 
     def on_text_source_code(self) -> None:
-        self.log_debug("[Текст] Исходный код программы — не реализовано")
+        self.log_debug_tr("text_source_code_stub")
 
 
 
@@ -1387,41 +1583,29 @@ class CompilerWindow(QMainWindow):
         self.result_tabs.clear_errors()
         self.result_tabs.output_text.clear()
         self.result_tabs.log_text.clear()
+        self._output_history.clear()
+        self._log_history.clear()
 
         editor = self._current_editor()
         if not editor:
-            self.log(tr("run_no_active_editor"))
+            self._has_run_result = False
+            self._last_run_tokens = []
+            self._last_run_errors = 0
+            self._last_run_lines = 0
+            self._last_run_chars = 0
+            self.log_tr("run_no_active_editor")
             return
 
         text = editor.toPlainText()
-        tokens = self.lexical_analyzer.analyze(text)
-        errors = 0
-
-        for token in tokens:
-            self.result_tabs.add_lexeme(token)
-            if token.is_error:
-                errors += 1
-
-        self.log(
-            tr("run_summary").format(
-                tokens=len(tokens),
-                errors=errors,
-                lines=editor.blockCount(),
-                chars=len(text),
-            )
+        self._last_run_tokens = self.lexical_analyzer.analyze(text)
+        self._last_run_errors = sum(
+            1 for token in self._last_run_tokens if token.is_error
         )
-        if errors:
-            self.log_debug(
-                tr("run_done_with_errors").format(errors=errors)
-            )
-            self.statusBar().showMessage(
-                tr("run_done_with_errors").format(errors=errors)
-            )
-        else:
-            self.log_debug(tr("run_done_ok"))
-            self.statusBar().showMessage(tr("run_done_ok"))
+        self._last_run_lines = editor.blockCount()
+        self._last_run_chars = len(text)
+        self._has_run_result = True
 
-        self.result_tabs.setCurrentIndex(0)
+        self._render_run_results(update_status=True, focus_results=True)
 
     def _on_error_go_to(self, line: int, col: int) -> None:
         editor = self._current_editor()
@@ -1510,6 +1694,11 @@ class CompilerWindow(QMainWindow):
 
 
         self.result_tabs.retranslate()
+
+        if self._has_run_result:
+            self._render_run_results(update_status=False, focus_results=False)
+        else:
+            self._rerender_message_history()
 
 
         self._update_title()
