@@ -1,6 +1,8 @@
 import os
 import sys
 
+from lexical_analyzer import Lexeme, LexicalAnalyzer
+
 from PyQt6.QtCore import (
     QMimeData,
     QRect,
@@ -107,21 +109,72 @@ TRANSLATIONS = {
             "или откройте файл (Ctrl+O)"
         ),
         "untitled": "Безымянный",
-        "errors_tab": "Ошибки",
+        "errors_tab": "Лексемы",
         "output_tab": "Вывод",
         "log_tab": "Лог",
+        "col_code": "Условный код",
+        "col_lexeme_type": "Тип лексемы",
+        "col_lexeme": "Лексема",
+        "col_location": "Местоположение",
         "col_line": "Строка",
         "col_column": "Столбец",
         "col_type": "Тип ошибки",
         "col_description": "Описание",
+        "location_format": "строка {line}, {start}-{end}",
         "status_line": "Стр: {line}",
         "status_col": "Кол: {col}",
         "status_lines_total": "Строк: {n}",
         "status_modified": "Изменён",
         "status_font_size": "Шрифт: {size}pt",
+        "run_no_active_editor": "Нет активной вкладки для анализа.",
+        "run_summary": (
+            "Распознано лексем: {tokens}. "
+            "Ошибок: {errors}. Строк: {lines}, символов: {chars}."
+        ),
+        "run_done_ok": "Лексический анализ завершен без ошибок",
+        "run_done_with_errors": "Лексический анализ завершен. Ошибок: {errors}",
         "analyzer_stub": (
             "[Пуск] Анализатор (заглушка) — демонстрационные ошибки добавлены."
         ),
+        "text_task_stub": "[Текст] Постановка задачи — не реализовано",
+        "text_grammar_stub": "[Текст] Грамматика — не реализовано",
+        "text_grammar_class_stub": (
+            "[Текст] Классификация грамматики — не реализовано"
+        ),
+        "text_analysis_method_stub": "[Текст] Метод анализа — не реализовано",
+        "text_test_example_stub": "[Текст] Тестовый пример — не реализовано",
+        "text_references_stub": "[Текст] Список литературы — не реализовано",
+        "text_source_code_stub": "[Текст] Исходный код программы — не реализовано",
+        "token_type_labels": {
+            -1: "лексическая ошибка",
+            1: "ключевое слово val",
+            2: "ключевое слово var",
+            3: "тип Int",
+            4: "идентификатор",
+            5: "двоеточие",
+            6: "открывающая скобка",
+            7: "закрывающая скобка",
+            8: "оператор деления",
+            9: "оператор минус",
+            10: "оператор стрелка",
+            11: "оператор плюс",
+            12: "оператор умножения",
+            13: "оператор присваивания",
+            14: "конец оператора",
+            15: "открывающая фигурная скобка",
+            16: "закрывающая фигурная скобка",
+            17: "запятая",
+            18: "оператор остатка",
+            19: "тип String",
+            20: "тип Double",
+            21: "тип Boolean",
+            22: "тип Float",
+            23: "разделитель (пробел)",
+            24: "целое без знака",
+            25: "двойная кавычка",
+        },
+        "space_lexeme_label": "(пробел)",
+        "invalid_symbol_template": "Недопустимый символ '{symbol}'",
         "search_stub": "Поиск…",
         "lang_ru": "Русский",
         "lang_en": "English",
@@ -217,19 +270,70 @@ TRANSLATIONS = {
             "or open a file (Ctrl+O)"
         ),
         "untitled": "Untitled",
-        "errors_tab": "Errors",
+        "errors_tab": "Lexemes",
         "output_tab": "Output",
         "log_tab": "Log",
+        "col_code": "Token Code",
+        "col_lexeme_type": "Token Type",
+        "col_lexeme": "Lexeme",
+        "col_location": "Location",
         "col_line": "Line",
         "col_column": "Column",
         "col_type": "Error Type",
         "col_description": "Description",
+        "location_format": "line {line}, {start}-{end}",
         "status_line": "Ln: {line}",
         "status_col": "Col: {col}",
         "status_lines_total": "Lines: {n}",
         "status_modified": "Modified",
         "status_font_size": "Font: {size}pt",
+        "run_no_active_editor": "No active tab to analyze.",
+        "run_summary": (
+            "Recognized tokens: {tokens}. "
+            "Errors: {errors}. Lines: {lines}, chars: {chars}."
+        ),
+        "run_done_ok": "Lexical analysis completed without errors",
+        "run_done_with_errors": "Lexical analysis completed. Errors: {errors}",
         "analyzer_stub": "[Run] Analyzer (stub) — demo errors added.",
+        "text_task_stub": "[Text] Problem statement — not implemented",
+        "text_grammar_stub": "[Text] Grammar — not implemented",
+        "text_grammar_class_stub": (
+            "[Text] Grammar classification — not implemented"
+        ),
+        "text_analysis_method_stub": "[Text] Analysis method — not implemented",
+        "text_test_example_stub": "[Text] Test example — not implemented",
+        "text_references_stub": "[Text] References — not implemented",
+        "text_source_code_stub": "[Text] Source code — not implemented",
+        "token_type_labels": {
+            -1: "lexical error",
+            1: "keyword val",
+            2: "keyword var",
+            3: "type Int",
+            4: "identifier",
+            5: "colon",
+            6: "opening parenthesis",
+            7: "closing parenthesis",
+            8: "division operator",
+            9: "minus operator",
+            10: "arrow operator",
+            11: "plus operator",
+            12: "multiplication operator",
+            13: "assignment operator",
+            14: "statement terminator",
+            15: "opening brace",
+            16: "closing brace",
+            17: "comma",
+            18: "modulo operator",
+            19: "type String",
+            20: "type Double",
+            21: "type Boolean",
+            22: "type Float",
+            23: "separator (space)",
+            24: "unsigned integer",
+            25: "double quote",
+        },
+        "space_lexeme_label": "(space)",
+        "invalid_symbol_template": "Invalid symbol '{symbol}'",
         "search_stub": "Find…",
         "lang_ru": "Русский",
         "lang_en": "English",
@@ -239,7 +343,7 @@ TRANSLATIONS = {
             "<h2>Compiler</h2>"
             "<p>Version 1.0</p>"
             "<p>Lab work: Language Processor</p>"
-            "<p>Author: Student</p>"
+            "<p>Author: Sergei Gerasimov</p>"
             "<p>© 2026</p>"
         ),
         "help_text": """\
@@ -279,6 +383,34 @@ def tr(key: str) -> str:
     return TRANSLATIONS.get(_current_lang, TRANSLATIONS["ru"]).get(key, key)
 
 
+def tr_value(key: str, default):
+    lang_dict = TRANSLATIONS.get(_current_lang, TRANSLATIONS["ru"])
+    if key in lang_dict:
+        return lang_dict[key]
+    return TRANSLATIONS["ru"].get(key, default)
+
+
+def token_type_label(code: int, is_error: bool) -> str:
+    labels = tr_value("token_type_labels", {})
+    if not isinstance(labels, dict):
+        labels = {}
+    if is_error:
+        return labels.get(-1, "lexical error")
+    return labels.get(code, str(code))
+
+
+def space_lexeme_label() -> str:
+    return tr_value("space_lexeme_label", "(space)")
+
+
+def invalid_symbol_message(symbol: str) -> str:
+    template = tr_value(
+        "invalid_symbol_template",
+        "Invalid symbol '{symbol}'",
+    )
+    return template.format(symbol=symbol)
+
+
 class CodeHighlighter(QSyntaxHighlighter):
 
     def __init__(self, parent=None):
@@ -291,15 +423,15 @@ class CodeHighlighter(QSyntaxHighlighter):
         kw_fmt.setForeground(QColor("#eb6b34"))
         kw_fmt.setFontWeight(QFont.Weight.Bold)
         keywords = [
-            "program", "begin", "end", "var", "const", "type",
-            "procedure", "function", "if", "then", "else",
-            "while", "do", "for", "to", "downto", "repeat", "until",
-            "case", "of", "with", "record", "array", "set",
-            "and", "or", "not", "div", "mod", "in",
-            "int", "real", "boolean", "char", "string",
-            "true", "false", "nil", "uses", "unit", "interface",
+            "end", "var", "val", "const", "type",
+            "fun", "if", "then", "else",
+            "while", "do", "for",
+            "case", "array", "set",
+            "and", "or", "not", "in",
+            "Int", "Float", "Boolean", "Char", "String", "Double"
+            "true", "false", "null", "interface",
             "implementation", "write", "writeln", "read", "readln",
-            "break", "continue", "exit", "result", "double",
+            "break", "continue", "exit", "result",
             "{", "}", "[", "]", "(", ")"
         ]
         pattern = r"\b(" + "|".join(keywords) + r")\b"
@@ -566,7 +698,7 @@ class ResultTabWidget(QTabWidget):
         self.error_table.horizontalHeader().setStretchLastSection(True)
         self.error_table.verticalHeader().setVisible(False)
         self._update_error_headers()
-        self.error_table.cellDoubleClicked.connect(
+        self.error_table.cellClicked.connect(
             self._on_error_double_click
         )
 
@@ -590,15 +722,36 @@ class ResultTabWidget(QTabWidget):
         self.setTabText(2, tr("log_tab"))
         self._update_error_headers()
 
-    def add_error(
-        self, line: int, column: int, error_type: str, description: str
-    ) -> None:
+    def add_lexeme(self, lexeme: Lexeme) -> None:
         row = self.error_table.rowCount()
         self.error_table.insertRow(row)
-        self.error_table.setItem(row, 0, QTableWidgetItem(str(line)))
-        self.error_table.setItem(row, 1, QTableWidgetItem(str(column)))
-        self.error_table.setItem(row, 2, QTableWidgetItem(error_type))
-        self.error_table.setItem(row, 3, QTableWidgetItem(description))
+
+        code_item = QTableWidgetItem(str(lexeme.code))
+        code_item.setData(Qt.ItemDataRole.UserRole, lexeme.line)
+        code_item.setData(Qt.ItemDataRole.UserRole + 1, lexeme.column_start)
+
+        location = tr("location_format").format(
+            line=lexeme.line,
+            start=lexeme.column_start,
+            end=lexeme.column_end,
+        )
+        if lexeme.is_error:
+            location = (
+                f"{location} | {invalid_symbol_message(lexeme.lexeme)}"
+            )
+
+        shown_lexeme = lexeme.lexeme
+        if lexeme.code == 23:
+            shown_lexeme = space_lexeme_label()
+
+        self.error_table.setItem(row, 0, code_item)
+        self.error_table.setItem(
+            row,
+            1,
+            QTableWidgetItem(token_type_label(lexeme.code, lexeme.is_error)),
+        )
+        self.error_table.setItem(row, 2, QTableWidgetItem(shown_lexeme))
+        self.error_table.setItem(row, 3, QTableWidgetItem(location))
 
     def clear_errors(self) -> None:
         self.error_table.setRowCount(0)
@@ -616,10 +769,10 @@ class ResultTabWidget(QTabWidget):
 
     def _update_error_headers(self) -> None:
         self.error_table.setHorizontalHeaderLabels([
-            tr("col_line"),
-            tr("col_column"),
-            tr("col_type"),
-            tr("col_description"),
+            tr("col_code"),
+            tr("col_lexeme_type"),
+            tr("col_lexeme"),
+            tr("col_location"),
         ])
         header = self.error_table.horizontalHeader()
         for i in range(3):
@@ -629,15 +782,14 @@ class ResultTabWidget(QTabWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
     def _on_error_double_click(self, row: int, _col: int) -> None:
-        line_item = self.error_table.item(row, 0)
-        col_item = self.error_table.item(row, 1)
-        if line_item and col_item:
-            try:
-                self.error_double_clicked.emit(
-                    int(line_item.text()), int(col_item.text())
-                )
-            except ValueError:
-                pass
+        code_item = self.error_table.item(row, 0)
+        if not code_item:
+            return
+
+        line = code_item.data(Qt.ItemDataRole.UserRole)
+        col = code_item.data(Qt.ItemDataRole.UserRole + 1)
+        if isinstance(line, int) and isinstance(col, int):
+            self.error_double_clicked.emit(line, col)
 
 
 
@@ -653,11 +805,24 @@ class CompilerWindow(QMainWindow):
     _tab_counter = 0
 
 
+    def _format_tr(self, key: str, **kwargs) -> str:
+        text = tr(key)
+        return text.format(**kwargs) if kwargs else text
+
+
     def __init__(self) -> None:
         super().__init__()
         self.setAcceptDrops(True)
         self._font_size = self.DEFAULT_FONT_SIZE
         self._tabs_data: dict[int, TabData] = {}
+        self.lexical_analyzer = LexicalAnalyzer()
+        self._has_run_result = False
+        self._last_run_tokens: list[Lexeme] = []
+        self._last_run_errors = 0
+        self._last_run_lines = 0
+        self._last_run_chars = 0
+        self._output_history: list[tuple[str, str, dict]] = []
+        self._log_history: list[tuple[str, str, dict]] = []
 
         self._setup_ui()
 
@@ -880,7 +1045,8 @@ class CompilerWindow(QMainWindow):
         self.text_menu.addAction(self.action_source_code)
 
 
-        menu_bar.addAction(self.action_run)
+        self.run_menu = menu_bar.addMenu(tr("run_menu"))
+        self.run_menu.addAction(self.action_run)
 
 
         self.lang_menu = menu_bar.addMenu(tr("language_menu"))
@@ -1107,27 +1273,8 @@ class CompilerWindow(QMainWindow):
         self._update_status_bar()
 
     def _on_tab_close_requested(self, index: int) -> None:
-        td = self._get_tab_data(index)
-        if td and td.is_modified:
-            name = self.tab_widget.tabText(index).rstrip(" *")
-            reply = QMessageBox.question(
-                self,
-                tr("save_changes_title"),
-                tr("save_changes_msg").format(name=name),
-                (
-                    QMessageBox.StandardButton.Yes
-                    | QMessageBox.StandardButton.No
-                    | QMessageBox.StandardButton.Cancel
-                ),
-                QMessageBox.StandardButton.Yes,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self.tab_widget.setCurrentIndex(index)
-                self.on_file_save()
-                if td.is_modified:
-                    return
-            elif reply == QMessageBox.StandardButton.Cancel:
-                return
+        if not self._ask_save_tab_changes(index, allow_cancel=False):
+            return
 
         w = self.tab_widget.widget(index)
         if w:
@@ -1154,6 +1301,39 @@ class CompilerWindow(QMainWindow):
             return os.path.basename(td.file_path)
         idx = self.tab_widget.indexOf(td.editor)
         return self.tab_widget.tabText(idx).rstrip(" *")
+
+    def _ask_save_tab_changes(
+        self,
+        index: int,
+        allow_cancel: bool,
+    ) -> bool:
+        td = self._get_tab_data(index)
+        if not td or not td.is_modified:
+            return True
+
+        name = self.tab_widget.tabText(index).rstrip(" *")
+        buttons = (
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+        )
+        if allow_cancel:
+            buttons |= QMessageBox.StandardButton.Cancel
+
+        reply = QMessageBox.question(
+            self,
+            tr("save_changes_title"),
+            tr("save_changes_msg").format(name=name),
+            buttons,
+            QMessageBox.StandardButton.Yes,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.tab_widget.setCurrentIndex(index)
+            self.on_file_save()
+            return not td.is_modified
+        if reply == QMessageBox.StandardButton.Cancel:
+            return False
+        return True
 
 
 
@@ -1183,10 +1363,80 @@ class CompilerWindow(QMainWindow):
         self._update_status_bar()
 
     def log(self, message: str) -> None:
+        self._output_history.append(("raw", message, {}))
         self.result_tabs.output_text.appendPlainText(message)
 
     def log_debug(self, message: str) -> None:
+        self._log_history.append(("raw", message, {}))
         self.result_tabs.log_text.appendPlainText(message)
+
+    def log_tr(self, key: str, **kwargs) -> None:
+        self._output_history.append(("tr", key, dict(kwargs)))
+        self.result_tabs.output_text.appendPlainText(
+            self._format_tr(key, **kwargs)
+        )
+
+    def log_debug_tr(self, key: str, **kwargs) -> None:
+        self._log_history.append(("tr", key, dict(kwargs)))
+        self.result_tabs.log_text.appendPlainText(
+            self._format_tr(key, **kwargs)
+        )
+
+    def _rerender_message_history(self) -> None:
+        self.result_tabs.output_text.clear()
+        for kind, payload, data in self._output_history:
+            if kind == "tr":
+                self.result_tabs.output_text.appendPlainText(
+                    self._format_tr(payload, **data)
+                )
+            else:
+                self.result_tabs.output_text.appendPlainText(payload)
+
+        self.result_tabs.log_text.clear()
+        for kind, payload, data in self._log_history:
+            if kind == "tr":
+                self.result_tabs.log_text.appendPlainText(
+                    self._format_tr(payload, **data)
+                )
+            else:
+                self.result_tabs.log_text.appendPlainText(payload)
+
+    def _render_run_results(
+        self,
+        update_status: bool = True,
+        focus_results: bool = True,
+    ) -> None:
+        self.result_tabs.clear_errors()
+        self.result_tabs.output_text.clear()
+        self.result_tabs.log_text.clear()
+        self._output_history.clear()
+        self._log_history.clear()
+
+        for token in self._last_run_tokens:
+            self.result_tabs.add_lexeme(token)
+
+        self.log_tr(
+            "run_summary",
+            tokens=len(self._last_run_tokens),
+            errors=self._last_run_errors,
+            lines=self._last_run_lines,
+            chars=self._last_run_chars,
+        )
+
+        if self._last_run_errors:
+            completion_key = "run_done_with_errors"
+            completion_kwargs = {"errors": self._last_run_errors}
+        else:
+            completion_key = "run_done_ok"
+            completion_kwargs = {}
+
+        self.log_debug_tr(completion_key, **completion_kwargs)
+        completion = self._format_tr(completion_key, **completion_kwargs)
+
+        if update_status:
+            self.statusBar().showMessage(completion)
+        if focus_results:
+            self.result_tabs.setCurrentIndex(0)
 
 
     def on_file_new(self) -> None:
@@ -1321,25 +1571,25 @@ class CompilerWindow(QMainWindow):
 
 
     def on_text_task(self) -> None:
-        self.log_debug("[Текст] Постановка задачи — не реализовано")
+        self.log_debug_tr("text_task_stub")
 
     def on_text_grammar(self) -> None:
-        self.log_debug("[Текст] Грамматика — не реализовано")
+        self.log_debug_tr("text_grammar_stub")
 
     def on_text_grammar_class(self) -> None:
-        self.log_debug("[Текст] Классификация грамматики — не реализовано")
+        self.log_debug_tr("text_grammar_class_stub")
 
     def on_text_analysis_method(self) -> None:
-        self.log_debug("[Текст] Метод анализа — не реализовано")
+        self.log_debug_tr("text_analysis_method_stub")
 
     def on_text_test_example(self) -> None:
-        self.log_debug("[Текст] Тестовый пример — не реализовано")
+        self.log_debug_tr("text_test_example_stub")
 
     def on_text_references(self) -> None:
-        self.log_debug("[Текст] Список литературы — не реализовано")
+        self.log_debug_tr("text_references_stub")
 
     def on_text_source_code(self) -> None:
-        self.log_debug("[Текст] Исходный код программы — не реализовано")
+        self.log_debug_tr("text_source_code_stub")
 
 
 
@@ -1348,32 +1598,30 @@ class CompilerWindow(QMainWindow):
     def on_run(self) -> None:
         self.result_tabs.clear_errors()
         self.result_tabs.output_text.clear()
+        self.result_tabs.log_text.clear()
+        self._output_history.clear()
+        self._log_history.clear()
 
         editor = self._current_editor()
         if not editor:
-            self.log(tr("analyzer_stub"))
+            self._has_run_result = False
+            self._last_run_tokens = []
+            self._last_run_errors = 0
+            self._last_run_lines = 0
+            self._last_run_chars = 0
+            self.log_tr("run_no_active_editor")
             return
 
         text = editor.toPlainText()
-        self.log(tr("analyzer_stub"))
-        self.log(
-            f"Текст содержит {editor.blockCount()} строк, "
-            f"{len(text)} символов."
+        self._last_run_tokens = self.lexical_analyzer.analyze(text)
+        self._last_run_errors = sum(
+            1 for token in self._last_run_tokens if token.is_error
         )
+        self._last_run_lines = editor.blockCount()
+        self._last_run_chars = len(text)
+        self._has_run_result = True
 
-
-        self.result_tabs.add_error(
-            1, 1, "Лексическая", "Неопознанный символ '@'"
-        )
-        self.result_tabs.add_error(
-            3, 10, "Синтаксическая", "Ожидался ';' после выражения"
-        )
-        self.result_tabs.add_error(
-            5, 5, "Семантическая", "Переменная 'x' не объявлена"
-        )
-
-        self.result_tabs.setCurrentIndex(0)
-        self.statusBar().showMessage(tr("analyzer_stub"))
+        self._render_run_results(update_status=True, focus_results=True)
 
     def _on_error_go_to(self, line: int, col: int) -> None:
         editor = self._current_editor()
@@ -1463,6 +1711,11 @@ class CompilerWindow(QMainWindow):
 
         self.result_tabs.retranslate()
 
+        if self._has_run_result:
+            self._render_run_results(update_status=False, focus_results=False)
+        else:
+            self._rerender_message_history()
+
 
         self._update_title()
         self._update_status_bar()
@@ -1499,29 +1752,9 @@ class CompilerWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         for i in range(self.tab_widget.count()):
-            td = self._get_tab_data(i)
-            if td and td.is_modified:
-                self.tab_widget.setCurrentIndex(i)
-                name = self.tab_widget.tabText(i).rstrip(" *")
-                reply = QMessageBox.question(
-                    self,
-                    tr("save_changes_title"),
-                    tr("save_changes_msg").format(name=name),
-                    (
-                        QMessageBox.StandardButton.Yes
-                        | QMessageBox.StandardButton.No
-                        | QMessageBox.StandardButton.Cancel
-                    ),
-                    QMessageBox.StandardButton.Yes,
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    self.on_file_save()
-                    if td.is_modified:
-                        event.ignore()
-                        return
-                elif reply == QMessageBox.StandardButton.Cancel:
-                    event.ignore()
-                    return
+            if not self._ask_save_tab_changes(i, allow_cancel=True):
+                event.ignore()
+                return
         event.accept()
 
 
