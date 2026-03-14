@@ -1271,27 +1271,8 @@ class CompilerWindow(QMainWindow):
         self._update_status_bar()
 
     def _on_tab_close_requested(self, index: int) -> None:
-        td = self._get_tab_data(index)
-        if td and td.is_modified:
-            name = self.tab_widget.tabText(index).rstrip(" *")
-            reply = QMessageBox.question(
-                self,
-                tr("save_changes_title"),
-                tr("save_changes_msg").format(name=name),
-                (
-                    QMessageBox.StandardButton.Yes
-                    | QMessageBox.StandardButton.No
-                    | QMessageBox.StandardButton.Cancel
-                ),
-                QMessageBox.StandardButton.Yes,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self.tab_widget.setCurrentIndex(index)
-                self.on_file_save()
-                if td.is_modified:
-                    return
-            elif reply == QMessageBox.StandardButton.Cancel:
-                return
+        if not self._ask_save_tab_changes(index, allow_cancel=False):
+            return
 
         w = self.tab_widget.widget(index)
         if w:
@@ -1318,6 +1299,39 @@ class CompilerWindow(QMainWindow):
             return os.path.basename(td.file_path)
         idx = self.tab_widget.indexOf(td.editor)
         return self.tab_widget.tabText(idx).rstrip(" *")
+
+    def _ask_save_tab_changes(
+        self,
+        index: int,
+        allow_cancel: bool,
+    ) -> bool:
+        td = self._get_tab_data(index)
+        if not td or not td.is_modified:
+            return True
+
+        name = self.tab_widget.tabText(index).rstrip(" *")
+        buttons = (
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+        )
+        if allow_cancel:
+            buttons |= QMessageBox.StandardButton.Cancel
+
+        reply = QMessageBox.question(
+            self,
+            tr("save_changes_title"),
+            tr("save_changes_msg").format(name=name),
+            buttons,
+            QMessageBox.StandardButton.Yes,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.tab_widget.setCurrentIndex(index)
+            self.on_file_save()
+            return not td.is_modified
+        if reply == QMessageBox.StandardButton.Cancel:
+            return False
+        return True
 
 
 
@@ -1736,29 +1750,9 @@ class CompilerWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         for i in range(self.tab_widget.count()):
-            td = self._get_tab_data(i)
-            if td and td.is_modified:
-                self.tab_widget.setCurrentIndex(i)
-                name = self.tab_widget.tabText(i).rstrip(" *")
-                reply = QMessageBox.question(
-                    self,
-                    tr("save_changes_title"),
-                    tr("save_changes_msg").format(name=name),
-                    (
-                        QMessageBox.StandardButton.Yes
-                        | QMessageBox.StandardButton.No
-                        | QMessageBox.StandardButton.Cancel
-                    ),
-                    QMessageBox.StandardButton.Yes,
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    self.on_file_save()
-                    if td.is_modified:
-                        event.ignore()
-                        return
-                elif reply == QMessageBox.StandardButton.Cancel:
-                    event.ignore()
-                    return
+            if not self._ask_save_tab_changes(i, allow_cancel=True):
+                event.ignore()
+                return
         event.accept()
 
 
