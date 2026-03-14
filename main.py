@@ -171,6 +171,7 @@ TRANSLATIONS = {
             22: "тип Float",
             23: "разделитель (пробел)",
             24: "целое без знака",
+            25: "двойная кавычка",
         },
         "space_lexeme_label": "(пробел)",
         "invalid_symbol_template": "Недопустимый символ '{symbol}'",
@@ -329,6 +330,7 @@ TRANSLATIONS = {
             22: "type Float",
             23: "separator (space)",
             24: "unsigned integer",
+            25: "double quote",
         },
         "space_lexeme_label": "(space)",
         "invalid_symbol_template": "Invalid symbol '{symbol}'",
@@ -421,15 +423,15 @@ class CodeHighlighter(QSyntaxHighlighter):
         kw_fmt.setForeground(QColor("#eb6b34"))
         kw_fmt.setFontWeight(QFont.Weight.Bold)
         keywords = [
-            "program", "begin", "end", "var", "const", "type",
-            "procedure", "function", "if", "then", "else",
-            "while", "do", "for", "to", "downto", "repeat", "until",
-            "case", "of", "with", "record", "array", "set",
-            "and", "or", "not", "div", "mod", "in",
-            "int", "real", "boolean", "char", "string",
-            "true", "false", "nil", "uses", "unit", "interface",
+            "end", "var", "val", "const", "type",
+            "fun", "if", "then", "else",
+            "while", "do", "for",
+            "case", "array", "set",
+            "and", "or", "not", "in",
+            "Int", "Float", "Boolean", "Char", "String", "Double"
+            "true", "false", "null", "interface",
             "implementation", "write", "writeln", "read", "readln",
-            "break", "continue", "exit", "result", "double",
+            "break", "continue", "exit", "result",
             "{", "}", "[", "]", "(", ")"
         ]
         pattern = r"\b(" + "|".join(keywords) + r")\b"
