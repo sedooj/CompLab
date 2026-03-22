@@ -85,10 +85,10 @@ class LexicalAnalyzer:
                 continue
 
 
-            if ch.isalpha():
+            if ch.isalpha() or ch == "_":
                 start_idx = i
                 start_col = col
-                while i < len(text) and text[i].isalnum():
+                while i < len(text) and (text[i].isalnum() or text[i] == "_"):
                     i += 1
                     col += 1
                 lexeme = text[start_idx:i]

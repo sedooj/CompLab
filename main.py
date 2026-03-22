@@ -700,22 +700,7 @@ class ResultTabWidget(QTabWidget):
         super().__init__(parent)
         self.setTabsClosable(False)
 
-        # Lexemes table (all tokens including spaces)
-        self.lexeme_table = QTableWidget(0, 4, self)
-        self.lexeme_table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers
-        )
-        self.lexeme_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self.lexeme_table.horizontalHeader().setStretchLastSection(True)
-        self.lexeme_table.verticalHeader().setVisible(False)
-        self._update_lexeme_headers()
-        self.lexeme_table.cellClicked.connect(
-            self._on_lexeme_click
-        )
-
-        # Errors table (only syntax and lexical errors)
+        # Errors table (only syntax errors)
         self.error_table = QTableWidget(0, 3, self)
         self.error_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers
@@ -749,46 +734,15 @@ class ResultTabWidget(QTabWidget):
         self.log_text = QPlainTextEdit(self)
         self.log_text.setReadOnly(True)
 
-        self.addTab(self.lexeme_table, tr("lexemes_tab"))
         self.addTab(error_container, tr("errors_tab"))
         self.addTab(self.output_text, tr("output_tab"))
         self.addTab(self.log_text, tr("log_tab"))
 
     def retranslate(self) -> None:
-        self.setTabText(0, tr("lexemes_tab"))
-        self.setTabText(1, tr("errors_tab"))
-        self.setTabText(2, tr("output_tab"))
-        self.setTabText(3, tr("log_tab"))
-        self._update_lexeme_headers()
+        self.setTabText(0, tr("errors_tab"))
+        self.setTabText(1, tr("output_tab"))
+        self.setTabText(2, tr("log_tab"))
         self._update_error_headers()
-
-    def add_lexeme(self, lexeme: Lexeme) -> None:
-        """Add a lexeme (token) to the lexemes table"""
-        row = self.lexeme_table.rowCount()
-        self.lexeme_table.insertRow(row)
-
-        code_item = QTableWidgetItem(str(lexeme.code))
-        code_item.setData(Qt.ItemDataRole.UserRole, lexeme.line)
-        code_item.setData(Qt.ItemDataRole.UserRole + 1, lexeme.column_start)
-
-        location = tr("location_format").format(
-            line=lexeme.line,
-            start=lexeme.column_start,
-            end=lexeme.column_end,
-        )
-
-        shown_lexeme = lexeme.lexeme
-        if lexeme.code == 23:
-            shown_lexeme = space_lexeme_label()
-
-        self.lexeme_table.setItem(row, 0, code_item)
-        self.lexeme_table.setItem(
-            row,
-            1,
-            QTableWidgetItem(token_type_label(lexeme.code, lexeme.is_error)),
-        )
-        self.lexeme_table.setItem(row, 2, QTableWidgetItem(shown_lexeme))
-        self.lexeme_table.setItem(row, 3, QTableWidgetItem(location))
 
     def add_error(self, fragment: str, line: int, column: int, description: str) -> None:
         """Add an error to the errors table"""
@@ -819,15 +773,6 @@ class ResultTabWidget(QTabWidget):
             error.message
         )
 
-    def add_lexical_error(self, lexeme: Lexeme) -> None:
-        """Add a lexical error to the errors table"""
-        self.add_error(
-            lexeme.lexeme,
-            lexeme.line,
-            lexeme.column_start,
-            lexeme.error_message
-        )
-
     def update_error_count(self, error_count: int) -> None:
         """Update the error count label"""
         if error_count == 0:
@@ -837,32 +782,17 @@ class ResultTabWidget(QTabWidget):
         self.error_count_label.setText(text)
 
     def clear_errors(self) -> None:
-        self.lexeme_table.setRowCount(0)
         self.error_table.setRowCount(0)
         self.error_count_label.setText(tr("no_errors"))
 
     def set_font_size(self, size: int) -> None:
-        for widget in (self.output_text, self.log_text, self.lexeme_table, self.error_table):
+        for widget in (self.output_text, self.log_text, self.error_table):
             f = widget.font()
             f.setPointSize(size)
             widget.setFont(f)
         lbl_font = self.error_count_label.font()
         lbl_font.setPointSize(size)
         self.error_count_label.setFont(lbl_font)
-
-    def _update_lexeme_headers(self) -> None:
-        self.lexeme_table.setHorizontalHeaderLabels([
-            tr("col_code"),
-            tr("col_lexeme_type"),
-            tr("col_lexeme"),
-            tr("col_location"),
-        ])
-        header = self.lexeme_table.horizontalHeader()
-        for i in range(3):
-            header.setSectionResizeMode(
-                i, QHeaderView.ResizeMode.ResizeToContents
-            )
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
     def _update_error_headers(self) -> None:
         self.error_table.setHorizontalHeaderLabels([
@@ -874,17 +804,6 @@ class ResultTabWidget(QTabWidget):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-
-    def _on_lexeme_click(self, row: int, _col: int) -> None:
-        """Handle click on lexeme table"""
-        item = self.lexeme_table.item(row, 0)
-        if not item:
-            return
-
-        line = item.data(Qt.ItemDataRole.UserRole)
-        col = item.data(Qt.ItemDataRole.UserRole + 1)
-        if isinstance(line, int) and isinstance(col, int):
-            self.error_double_clicked.emit(line, col)
 
     def _on_error_click(self, row: int, _col: int) -> None:
         """Handle click on error table"""
@@ -1520,23 +1439,12 @@ class CompilerWindow(QMainWindow):
         self._output_history.clear()
         self._log_history.clear()
 
-        # Add all tokens to lexemes table
-        for token in self._last_run_tokens:
-            self.result_tabs.add_lexeme(token)
-        
-        # Add only errors to errors table
-        lexical_error_count = 0
-        for token in self._last_run_tokens:
-            if token.is_error:
-                self.result_tabs.add_lexical_error(token)
-                lexical_error_count += 1
-        
         # Add syntax errors to errors table
         for error in self._last_run_syntax_errors:
             self.result_tabs.add_syntax_error(error)
         
         # Update error count
-        total_errors = lexical_error_count + len(self._last_run_syntax_errors)
+        total_errors = len(self._last_run_syntax_errors)
         self.result_tabs.update_error_count(total_errors)
 
         self.log_tr(
@@ -1560,11 +1468,7 @@ class CompilerWindow(QMainWindow):
         if update_status:
             self.statusBar().showMessage(completion)
         if focus_results:
-            # Switch to errors tab if there are errors, otherwise to lexemes tab
-            if self._last_run_errors:
-                self.result_tabs.setCurrentIndex(1)  # Errors tab
-            else:
-                self.result_tabs.setCurrentIndex(0)  # Lexemes tab
+            self.result_tabs.setCurrentIndex(0)
 
 
     def on_file_new(self) -> None:
@@ -1749,9 +1653,7 @@ class CompilerWindow(QMainWindow):
         parse_result = self.syntax_analyzer.analyze(self._last_run_tokens)
         self._last_run_syntax_errors = parse_result.errors
         
-        self._last_run_errors = sum(
-            1 for token in self._last_run_tokens if token.is_error
-        ) + len(self._last_run_syntax_errors)
+        self._last_run_errors = len(self._last_run_syntax_errors)
         self._last_run_lines = editor.blockCount()
         self._last_run_chars = len(text)
         self._has_run_result = True
