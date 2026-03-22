@@ -15,6 +15,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QAction,
+    QActionGroup,
     QColor,
     QDragEnterEvent,
     QDropEvent,
@@ -29,6 +30,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -124,6 +126,11 @@ TRANSLATIONS = {
         "col_error_description": "Описание ошибки",
         "errors_count": "Общее количество ошибок:",
         "no_errors": "Нет ошибок",
+        "analyzer_mode_menu": "Анализатор",
+        "analyzer_mode_label": "Анализатор:",
+        "analyzer_mode_recursive": "Рекурсивный спуск",
+        "analyzer_mode_antlr": "ANTLR",
+        "analyzer_mode_status": "Режим анализатора: {mode}",
         "col_line": "Строка",
         "col_column": "Столбец",
         "col_type": "Тип ошибки",
@@ -291,6 +298,11 @@ TRANSLATIONS = {
         "col_error_description": "Error Description",
         "errors_count": "Total errors:",
         "no_errors": "No errors",
+        "analyzer_mode_menu": "Analyzer",
+        "analyzer_mode_label": "Analyzer:",
+        "analyzer_mode_recursive": "Recursive Descent",
+        "analyzer_mode_antlr": "ANTLR",
+        "analyzer_mode_status": "Analyzer mode: {mode}",
         "col_line": "Line",
         "col_column": "Column",
         "col_type": "Error Type",
@@ -840,6 +852,7 @@ class CompilerWindow(QMainWindow):
         super().__init__()
         self.setAcceptDrops(True)
         self._font_size = self.DEFAULT_FONT_SIZE
+        self._analyzer_mode = "recursive"
         self._tabs_data: dict[int, TabData] = {}
         self.lexical_analyzer = LexicalAnalyzer()
         self.antlr_syntax_analyzer = AntlrSyntaxAnalyzer()
@@ -996,6 +1009,26 @@ class CompilerWindow(QMainWindow):
         self.action_run.triggered.connect(self.on_run)
         self.action_run.setIcon(QIcon.fromTheme("media-playback-start"))
 
+        self.action_mode_recursive = QAction(
+            tr("analyzer_mode_recursive"), self
+        )
+        self.action_mode_recursive.setCheckable(True)
+        self.action_mode_recursive.triggered.connect(
+            lambda: self._set_analyzer_mode("recursive")
+        )
+
+        self.action_mode_antlr = QAction(tr("analyzer_mode_antlr"), self)
+        self.action_mode_antlr.setCheckable(True)
+        self.action_mode_antlr.triggered.connect(
+            lambda: self._set_analyzer_mode("antlr")
+        )
+
+        self.analyzer_mode_group = QActionGroup(self)
+        self.analyzer_mode_group.setExclusive(True)
+        self.analyzer_mode_group.addAction(self.action_mode_recursive)
+        self.analyzer_mode_group.addAction(self.action_mode_antlr)
+        self._sync_analyzer_actions()
+
 
         self.action_find = QAction(tr("search_stub"), self)
         self.action_find.setShortcut(QKeySequence("Ctrl+F"))
@@ -1076,6 +1109,10 @@ class CompilerWindow(QMainWindow):
 
         self.run_menu = menu_bar.addMenu(tr("run_menu"))
         self.run_menu.addAction(self.action_run)
+        self.run_menu.addSeparator()
+        self.analyzer_menu = self.run_menu.addMenu(tr("analyzer_mode_menu"))
+        self.analyzer_menu.addAction(self.action_mode_recursive)
+        self.analyzer_menu.addAction(self.action_mode_antlr)
 
 
         self.lang_menu = menu_bar.addMenu(tr("language_menu"))
@@ -1128,6 +1165,22 @@ class CompilerWindow(QMainWindow):
         self.font_size_spin.valueChanged.connect(self._on_font_spin_changed)
         toolbar.addWidget(QLabel(" " + tr("font_label") + " "))
         toolbar.addWidget(self.font_size_spin)
+
+        toolbar.addSeparator()
+        toolbar.addWidget(QLabel(" " + tr("analyzer_mode_label") + " "))
+        self.analyzer_mode_combo = QComboBox(self)
+        self.analyzer_mode_combo.addItem(
+            tr("analyzer_mode_recursive"), "recursive"
+        )
+        self.analyzer_mode_combo.addItem(tr("analyzer_mode_antlr"), "antlr")
+        selected_index = (
+            1 if self._analyzer_mode == "antlr" else 0
+        )
+        self.analyzer_mode_combo.setCurrentIndex(selected_index)
+        self.analyzer_mode_combo.currentIndexChanged.connect(
+            self._on_analyzer_mode_combo_changed
+        )
+        toolbar.addWidget(self.analyzer_mode_combo)
 
         toolbar.addSeparator()
         toolbar.addAction(self.action_help)
@@ -1651,10 +1704,10 @@ class CompilerWindow(QMainWindow):
         # Lexical analysis
         self._last_run_tokens = self.lexical_analyzer.analyze(text)
         
-        # Syntax analysis (ANTLR as primary, recursive-descent as fallback)
-        try:
+        # Syntax analysis using the explicitly selected mode.
+        if self._analyzer_mode == "antlr":
             parse_result = self.antlr_syntax_analyzer.analyze_text(text)
-        except Exception:
+        else:
             parse_result = self.syntax_analyzer.analyze(self._last_run_tokens)
         self._last_run_syntax_errors = parse_result.errors
         
@@ -1706,6 +1759,31 @@ class CompilerWindow(QMainWindow):
         _current_lang = lang
         self._retranslate_ui()
 
+    def _sync_analyzer_actions(self) -> None:
+        if self._analyzer_mode == "antlr":
+            self.action_mode_antlr.setChecked(True)
+        else:
+            self.action_mode_recursive.setChecked(True)
+
+    def _set_analyzer_mode(self, mode: str) -> None:
+        if mode not in {"recursive", "antlr"}:
+            return
+        if self._analyzer_mode == mode:
+            return
+        self._analyzer_mode = mode
+        self._sync_analyzer_actions()
+        mode_label = tr(
+            "analyzer_mode_antlr" if mode == "antlr" else "analyzer_mode_recursive"
+        )
+        self.statusBar().showMessage(
+            tr("analyzer_mode_status").format(mode=mode_label)
+        )
+
+    def _on_analyzer_mode_combo_changed(self, index: int) -> None:
+        mode = self.analyzer_mode_combo.itemData(index)
+        if isinstance(mode, str):
+            self._set_analyzer_mode(mode)
+
     def _retranslate_ui(self) -> None:
 
         action_keys = {
@@ -1732,6 +1810,8 @@ class CompilerWindow(QMainWindow):
             "action_references": "references",
             "action_source_code": "source_code",
             "action_run": "run",
+            "action_mode_recursive": "analyzer_mode_recursive",
+            "action_mode_antlr": "analyzer_mode_antlr",
             "action_find": "search_stub",
             "action_help": "help",
             "action_about": "about",
