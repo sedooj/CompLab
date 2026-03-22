@@ -277,13 +277,19 @@ TRANSLATIONS = {
             "or open a file (Ctrl+O)"
         ),
         "untitled": "Untitled",
-        "errors_tab": "Lexemes",
+        "lexemes_tab": "Lexemes",
+        "errors_tab": "Errors",
         "output_tab": "Output",
         "log_tab": "Log",
         "col_code": "Token Code",
         "col_lexeme_type": "Token Type",
         "col_lexeme": "Lexeme",
         "col_location": "Location",
+        "col_error_fragment": "Incorrect Fragment",
+        "col_error_location": "Location",
+        "col_error_description": "Error Description",
+        "errors_count": "Total errors:",
+        "no_errors": "No errors",
         "col_line": "Line",
         "col_column": "Column",
         "col_type": "Error Type",
@@ -694,8 +700,23 @@ class ResultTabWidget(QTabWidget):
         super().__init__(parent)
         self.setTabsClosable(False)
 
+        # Lexemes table (all tokens including spaces)
+        self.lexeme_table = QTableWidget(0, 4, self)
+        self.lexeme_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+        self.lexeme_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self.lexeme_table.horizontalHeader().setStretchLastSection(True)
+        self.lexeme_table.verticalHeader().setVisible(False)
+        self._update_lexeme_headers()
+        self.lexeme_table.cellClicked.connect(
+            self._on_lexeme_click
+        )
 
-        self.error_table = QTableWidget(0, 4, self)
+        # Errors table (only syntax and lexical errors)
+        self.error_table = QTableWidget(0, 3, self)
         self.error_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers
         )
@@ -706,32 +727,45 @@ class ResultTabWidget(QTabWidget):
         self.error_table.verticalHeader().setVisible(False)
         self._update_error_headers()
         self.error_table.cellClicked.connect(
-            self._on_error_double_click
+            self._on_error_click
         )
 
-
+        # Error count label
+        self.error_count_label = QLabel()
+        self.error_count_label.setText(tr("no_errors"))
+        self.error_count_label.setStyleSheet("font-weight: bold; padding: 8px;")
+        
+        # Error table container with label
+        error_container = QWidget()
+        error_layout = QVBoxLayout(error_container)
+        error_layout.setContentsMargins(0, 0, 0, 0)
+        error_layout.addWidget(self.error_table)
+        error_layout.addWidget(self.error_count_label)
+        
+        # Output and log widgets
         self.output_text = QPlainTextEdit(self)
         self.output_text.setReadOnly(True)
-
 
         self.log_text = QPlainTextEdit(self)
         self.log_text.setReadOnly(True)
 
-        self.addTab(self.error_table, tr("errors_tab"))
+        self.addTab(self.lexeme_table, tr("lexemes_tab"))
+        self.addTab(error_container, tr("errors_tab"))
         self.addTab(self.output_text, tr("output_tab"))
         self.addTab(self.log_text, tr("log_tab"))
 
-
-
     def retranslate(self) -> None:
-        self.setTabText(0, tr("errors_tab"))
-        self.setTabText(1, tr("output_tab"))
-        self.setTabText(2, tr("log_tab"))
+        self.setTabText(0, tr("lexemes_tab"))
+        self.setTabText(1, tr("errors_tab"))
+        self.setTabText(2, tr("output_tab"))
+        self.setTabText(3, tr("log_tab"))
+        self._update_lexeme_headers()
         self._update_error_headers()
 
     def add_lexeme(self, lexeme: Lexeme) -> None:
-        row = self.error_table.rowCount()
-        self.error_table.insertRow(row)
+        """Add a lexeme (token) to the lexemes table"""
+        row = self.lexeme_table.rowCount()
+        self.lexeme_table.insertRow(row)
 
         code_item = QTableWidgetItem(str(lexeme.code))
         code_item.setData(Qt.ItemDataRole.UserRole, lexeme.line)
@@ -742,85 +776,124 @@ class ResultTabWidget(QTabWidget):
             start=lexeme.column_start,
             end=lexeme.column_end,
         )
-        if lexeme.is_error:
-            location = (
-                f"{location} | {invalid_symbol_message(lexeme.lexeme)}"
-            )
 
         shown_lexeme = lexeme.lexeme
         if lexeme.code == 23:
             shown_lexeme = space_lexeme_label()
 
-        self.error_table.setItem(row, 0, code_item)
-        self.error_table.setItem(
+        self.lexeme_table.setItem(row, 0, code_item)
+        self.lexeme_table.setItem(
             row,
             1,
             QTableWidgetItem(token_type_label(lexeme.code, lexeme.is_error)),
         )
-        self.error_table.setItem(row, 2, QTableWidgetItem(shown_lexeme))
-        self.error_table.setItem(row, 3, QTableWidgetItem(location))
+        self.lexeme_table.setItem(row, 2, QTableWidgetItem(shown_lexeme))
+        self.lexeme_table.setItem(row, 3, QTableWidgetItem(location))
 
-    def add_syntax_error(self, error: SyntaxError) -> None:
-        """Add a syntax error row to the error table"""
-        from syntax_analyzer import SyntaxError
+    def add_error(self, fragment: str, line: int, column: int, description: str) -> None:
+        """Add an error to the errors table"""
         row = self.error_table.rowCount()
         self.error_table.insertRow(row)
 
-        code_item = QTableWidgetItem("-")
-        code_item.setData(Qt.ItemDataRole.UserRole, error.line)
-        code_item.setData(Qt.ItemDataRole.UserRole + 1, error.column_start)
+        # Store position data for navigation
+        fragment_item = QTableWidgetItem(fragment)
+        fragment_item.setData(Qt.ItemDataRole.UserRole, line)
+        fragment_item.setData(Qt.ItemDataRole.UserRole + 1, column)
 
         location = tr("location_format").format(
-            line=error.line,
-            start=error.column_start,
-            end=error.column_end,
+            line=line,
+            start=column,
+            end=column,
         )
-        location = f"{location} | {error.message}"
 
-        self.error_table.setItem(row, 0, code_item)
-        self.error_table.setItem(
-            row,
-            1,
-            QTableWidgetItem(error.error_type),
+        self.error_table.setItem(row, 0, fragment_item)
+        self.error_table.setItem(row, 1, QTableWidgetItem(location))
+        self.error_table.setItem(row, 2, QTableWidgetItem(description))
+
+    def add_syntax_error(self, error: SyntaxError) -> None:
+        """Add a syntax error to the errors table"""
+        self.add_error(
+            error.unexpected_lexeme,
+            error.line,
+            error.column_start,
+            error.message
         )
-        self.error_table.setItem(row, 2, QTableWidgetItem(error.unexpected_lexeme))
-        self.error_table.setItem(row, 3, QTableWidgetItem(location))
+
+    def add_lexical_error(self, lexeme: Lexeme) -> None:
+        """Add a lexical error to the errors table"""
+        self.add_error(
+            lexeme.lexeme,
+            lexeme.line,
+            lexeme.column_start,
+            lexeme.error_message
+        )
+
+    def update_error_count(self, error_count: int) -> None:
+        """Update the error count label"""
+        if error_count == 0:
+            text = tr("no_errors")
+        else:
+            text = f"{tr('errors_count')} {error_count}"
+        self.error_count_label.setText(text)
 
     def clear_errors(self) -> None:
+        self.lexeme_table.setRowCount(0)
         self.error_table.setRowCount(0)
+        self.error_count_label.setText(tr("no_errors"))
 
     def set_font_size(self, size: int) -> None:
-        for widget in (self.output_text, self.log_text):
+        for widget in (self.output_text, self.log_text, self.lexeme_table, self.error_table):
             f = widget.font()
             f.setPointSize(size)
             widget.setFont(f)
-        tf = self.error_table.font()
-        tf.setPointSize(size)
-        self.error_table.setFont(tf)
+        lbl_font = self.error_count_label.font()
+        lbl_font.setPointSize(size)
+        self.error_count_label.setFont(lbl_font)
 
-
-
-    def _update_error_headers(self) -> None:
-        self.error_table.setHorizontalHeaderLabels([
+    def _update_lexeme_headers(self) -> None:
+        self.lexeme_table.setHorizontalHeaderLabels([
             tr("col_code"),
             tr("col_lexeme_type"),
             tr("col_lexeme"),
             tr("col_location"),
         ])
-        header = self.error_table.horizontalHeader()
+        header = self.lexeme_table.horizontalHeader()
         for i in range(3):
             header.setSectionResizeMode(
                 i, QHeaderView.ResizeMode.ResizeToContents
             )
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
-    def _on_error_double_click(self, row: int, _col: int) -> None:
-        code_item = self.error_table.item(row, 0)
-        if not code_item:
+    def _update_error_headers(self) -> None:
+        self.error_table.setHorizontalHeaderLabels([
+            tr("col_error_fragment"),
+            tr("col_error_location"),
+            tr("col_error_description"),
+        ])
+        header = self.error_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+
+    def _on_lexeme_click(self, row: int, _col: int) -> None:
+        """Handle click on lexeme table"""
+        item = self.lexeme_table.item(row, 0)
+        if not item:
             return
 
-        line = code_item.data(Qt.ItemDataRole.UserRole)
-        col = code_item.data(Qt.ItemDataRole.UserRole + 1)
+        line = item.data(Qt.ItemDataRole.UserRole)
+        col = item.data(Qt.ItemDataRole.UserRole + 1)
+        if isinstance(line, int) and isinstance(col, int):
+            self.error_double_clicked.emit(line, col)
+
+    def _on_error_click(self, row: int, _col: int) -> None:
+        """Handle click on error table"""
+        item = self.error_table.item(row, 0)
+        if not item:
+            return
+
+        line = item.data(Qt.ItemDataRole.UserRole)
+        col = item.data(Qt.ItemDataRole.UserRole + 1)
         if isinstance(line, int) and isinstance(col, int):
             self.error_double_clicked.emit(line, col)
 
@@ -1447,13 +1520,24 @@ class CompilerWindow(QMainWindow):
         self._output_history.clear()
         self._log_history.clear()
 
-        # Add lexical errors/tokens
+        # Add all tokens to lexemes table
         for token in self._last_run_tokens:
             self.result_tabs.add_lexeme(token)
         
-        # Add syntax errors
+        # Add only errors to errors table
+        lexical_error_count = 0
+        for token in self._last_run_tokens:
+            if token.is_error:
+                self.result_tabs.add_lexical_error(token)
+                lexical_error_count += 1
+        
+        # Add syntax errors to errors table
         for error in self._last_run_syntax_errors:
             self.result_tabs.add_syntax_error(error)
+        
+        # Update error count
+        total_errors = lexical_error_count + len(self._last_run_syntax_errors)
+        self.result_tabs.update_error_count(total_errors)
 
         self.log_tr(
             "run_summary",
@@ -1476,7 +1560,11 @@ class CompilerWindow(QMainWindow):
         if update_status:
             self.statusBar().showMessage(completion)
         if focus_results:
-            self.result_tabs.setCurrentIndex(0)
+            # Switch to errors tab if there are errors, otherwise to lexemes tab
+            if self._last_run_errors:
+                self.result_tabs.setCurrentIndex(1)  # Errors tab
+            else:
+                self.result_tabs.setCurrentIndex(0)  # Lexemes tab
 
 
     def on_file_new(self) -> None:
