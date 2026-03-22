@@ -2,6 +2,7 @@ import os
 import sys
 
 from lexical_analyzer import Lexeme, LexicalAnalyzer
+from antlr_syntax_analyzer import AntlrSyntaxAnalyzer
 from syntax_analyzer import SyntaxAnalyzer, SyntaxError
 
 from PyQt6.QtCore import (
@@ -841,6 +842,7 @@ class CompilerWindow(QMainWindow):
         self._font_size = self.DEFAULT_FONT_SIZE
         self._tabs_data: dict[int, TabData] = {}
         self.lexical_analyzer = LexicalAnalyzer()
+        self.antlr_syntax_analyzer = AntlrSyntaxAnalyzer()
         self.syntax_analyzer = SyntaxAnalyzer()
         self._has_run_result = False
         self._last_run_tokens: list[Lexeme] = []
@@ -1649,8 +1651,11 @@ class CompilerWindow(QMainWindow):
         # Lexical analysis
         self._last_run_tokens = self.lexical_analyzer.analyze(text)
         
-        # Syntax analysis
-        parse_result = self.syntax_analyzer.analyze(self._last_run_tokens)
+        # Syntax analysis (ANTLR as primary, recursive-descent as fallback)
+        try:
+            parse_result = self.antlr_syntax_analyzer.analyze_text(text)
+        except Exception:
+            parse_result = self.syntax_analyzer.analyze(self._last_run_tokens)
         self._last_run_syntax_errors = parse_result.errors
         
         self._last_run_errors = len(self._last_run_syntax_errors)
