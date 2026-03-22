@@ -2,6 +2,7 @@ import os
 import sys
 
 from lexical_analyzer import Lexeme, LexicalAnalyzer
+from syntax_analyzer import SyntaxAnalyzer, SyntaxError
 
 from PyQt6.QtCore import (
     QMimeData,
@@ -109,13 +110,19 @@ TRANSLATIONS = {
             "или откройте файл (Ctrl+O)"
         ),
         "untitled": "Безымянный",
-        "errors_tab": "Лексемы",
+        "lexemes_tab": "Лексемы",
+        "errors_tab": "Ошибки",
         "output_tab": "Вывод",
         "log_tab": "Лог",
         "col_code": "Условный код",
         "col_lexeme_type": "Тип лексемы",
         "col_lexeme": "Лексема",
         "col_location": "Местоположение",
+        "col_error_fragment": "Неверный фрагмент",
+        "col_error_location": "Местоположение",
+        "col_error_description": "Описание ошибки",
+        "errors_count": "Общее количество ошибок:",
+        "no_errors": "Нет ошибок",
         "col_line": "Строка",
         "col_column": "Столбец",
         "col_type": "Тип ошибки",
@@ -753,6 +760,32 @@ class ResultTabWidget(QTabWidget):
         self.error_table.setItem(row, 2, QTableWidgetItem(shown_lexeme))
         self.error_table.setItem(row, 3, QTableWidgetItem(location))
 
+    def add_syntax_error(self, error: SyntaxError) -> None:
+        """Add a syntax error row to the error table"""
+        from syntax_analyzer import SyntaxError
+        row = self.error_table.rowCount()
+        self.error_table.insertRow(row)
+
+        code_item = QTableWidgetItem("-")
+        code_item.setData(Qt.ItemDataRole.UserRole, error.line)
+        code_item.setData(Qt.ItemDataRole.UserRole + 1, error.column_start)
+
+        location = tr("location_format").format(
+            line=error.line,
+            start=error.column_start,
+            end=error.column_end,
+        )
+        location = f"{location} | {error.message}"
+
+        self.error_table.setItem(row, 0, code_item)
+        self.error_table.setItem(
+            row,
+            1,
+            QTableWidgetItem(error.error_type),
+        )
+        self.error_table.setItem(row, 2, QTableWidgetItem(error.unexpected_lexeme))
+        self.error_table.setItem(row, 3, QTableWidgetItem(location))
+
     def clear_errors(self) -> None:
         self.error_table.setRowCount(0)
 
@@ -816,9 +849,11 @@ class CompilerWindow(QMainWindow):
         self._font_size = self.DEFAULT_FONT_SIZE
         self._tabs_data: dict[int, TabData] = {}
         self.lexical_analyzer = LexicalAnalyzer()
+        self.syntax_analyzer = SyntaxAnalyzer()
         self._has_run_result = False
         self._last_run_tokens: list[Lexeme] = []
         self._last_run_errors = 0
+        self._last_run_syntax_errors: list[SyntaxError] = []
         self._last_run_lines = 0
         self._last_run_chars = 0
         self._output_history: list[tuple[str, str, dict]] = []
@@ -1412,8 +1447,13 @@ class CompilerWindow(QMainWindow):
         self._output_history.clear()
         self._log_history.clear()
 
+        # Add lexical errors/tokens
         for token in self._last_run_tokens:
             self.result_tabs.add_lexeme(token)
+        
+        # Add syntax errors
+        for error in self._last_run_syntax_errors:
+            self.result_tabs.add_syntax_error(error)
 
         self.log_tr(
             "run_summary",
@@ -1606,6 +1646,7 @@ class CompilerWindow(QMainWindow):
         if not editor:
             self._has_run_result = False
             self._last_run_tokens = []
+            self._last_run_syntax_errors = []
             self._last_run_errors = 0
             self._last_run_lines = 0
             self._last_run_chars = 0
@@ -1613,10 +1654,16 @@ class CompilerWindow(QMainWindow):
             return
 
         text = editor.toPlainText()
+        # Lexical analysis
         self._last_run_tokens = self.lexical_analyzer.analyze(text)
+        
+        # Syntax analysis
+        parse_result = self.syntax_analyzer.analyze(self._last_run_tokens)
+        self._last_run_syntax_errors = parse_result.errors
+        
         self._last_run_errors = sum(
             1 for token in self._last_run_tokens if token.is_error
-        )
+        ) + len(self._last_run_syntax_errors)
         self._last_run_lines = editor.blockCount()
         self._last_run_chars = len(text)
         self._has_run_result = True
