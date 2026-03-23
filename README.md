@@ -14,25 +14,35 @@
 1. `val calc: (Int, Int, Int) -> Int = { a, b, c -> a + (b * c) }`
 
 ## Разработка грамматики
-1. `<START> -> 'val' <DECL>`
-2. `<DECL> -> <IDENTIFIER> ':' <ARGS> '->' <TYPE> '=' <LAMBDA> <END>`
-3. `<ARGS> -> '(' <TYPE_LIST> ')'`
-4. `<TYPE_LIST> -> <TYPE> <TYPE_LIST_TAIL>`
-5. `<TYPE_LIST_TAIL> -> ',' <TYPE> <TYPE_LIST_TAIL> | eps`
-6. `<LAMBDA> -> '{' <PARAM_LIST> '->' <EXPR> '}'`
-7. `<PARAM_LIST> -> <IDENTIFIER> <PARAM_LIST_TAIL>`
-8. `<PARAM_LIST_TAIL> -> ',' <IDENTIFIER> <PARAM_LIST_TAIL> | eps`
-9. `<EXPR> -> <TERM> <EXPR_TAIL>`
-10. `<EXPR_TAIL> -> '+' <TERM> <EXPR_TAIL> | '-' <TERM> <EXPR_TAIL> | eps`
-11. `<TERM> -> <FACTOR> <TERM_TAIL>`
-12. `<TERM_TAIL> -> '*' <FACTOR> <TERM_TAIL> | '/' <FACTOR> <TERM_TAIL> | '%' <FACTOR> <TERM_TAIL> | eps`
-13. `<FACTOR> -> <IDENTIFIER> | <NUMBER> | '(' <EXPR> ')'`
-14. `<TYPE> -> Int | String | Float | Double | Boolean`
-15. `<END> -> ';' | eps`
-16. `<IDENTIFIER> -> letter <ID_TAIL>`
-17. `<ID_TAIL> -> letter <ID_TAIL> | digit <ID_TAIL> | '_' <ID_TAIL> | eps`
-18. `<NUMBER> -> digit <NUM_TAIL>`
-19. `<NUM_TAIL> -> digit <NUM_TAIL> | eps`
+1.	`<START> -> ‘val’ <VAL>`
+2.	`<VAL>   -> ‘ ’ <SPACE>`
+3.	`<SPACE> -> <IDENTIFIER>   <COLON>`
+4.	`<COLON> -> ‘:’ <ARG_LIST>`
+5.	`<ARG_LIST> -> ‘(‘ <ARG_LIST_TAIL>`
+6.	`<ARG_LIST_TAIL> -> <TYPE> <ARG_LIST_TAIL_CONT>`
+7.	`<ARG_LIST_TAIL_CONT> -> ',' <TYPE> <ARG_LIST_TAIL_CONT> | ')' '->' <ARROW_1>`
+8.	`<ARROW_1> -> <TYPE> <ASSIGN>`
+9.	`<ASSIGN> -> ‘=’ <LBRACE>`
+10.	`<LBRACE> -> ‘{‘ <PARAM_LIST> <ARROW_2>`
+11.	`<PARAM> -> <IDENTIFIER> | '_'`
+12.	`<PARAM_LIST> -> <PARAM> <PARAM_LIST_CONT>`
+13.	`<PARAM_LIST_CONT> -> ',' <PARAM> <PARAM_LIST_CONT> | ε`
+14.	`<ARROW_2> -> '->' <EXPR> <RBRACE>`
+15.	`<EXPR> -> <TERM> <EXPR_TAIL>`
+16.	`<EXPR_TAIL> -> ‘+’ <TERM> <EXPR_TAIL> | ‘-‘ <TERM> <EXPR_TAIL> | ε`
+17.	`<TERM> -> <FACTOR> <TERM_TAIL>`
+18.	 `<TERM_TAIL> -> ‘*’ <FACTOR> <TERM_TAIL> | ‘/’ <FACTOR> <TERM_TAIL> | ε`
+19.	`<FACTOR> -> <IDENTIFIER> | <NUMBER> | ‘(‘ <EXPR> ’)’` 
+20.	`<RBRACE> -> ‘}’ <END>` 
+21.	`<END> -> ‘;’`
+22.	`<TYPE> -> ‘Int’ | ‘String’ | ‘Double’ | ‘Float’`
+23.	 `<IDENTIFIER>   -> letter <ID_TAIL>`
+24.	`<ID_TAIL>   ->  letter <ID_TAIL> | digit <ID_TAIL> | ‘_’ <ID_TAIL> | ε`
+25.	 `<NUMBER>   ->  digit <NUM_TAIL>`
+26.	`<NUM_TAIL>   ->  digit <NUM_TAIL> | ε`
+
+## Диаграмма грамматики
+![grammar.jpg](images/samples/grammar.jpg)
 
 ## Классификация грамматики (по Хомскому)
 Данная грамматика является контекстно-свободной.

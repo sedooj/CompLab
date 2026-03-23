@@ -47,8 +47,6 @@ class _CollectingErrorListener(ErrorListener):
 
 
 class AntlrSyntaxAnalyzer:
-    """ANTLR-based syntax analyzer for the function-definition grammar."""
-
     def analyze_text(self, text: str) -> ParseResult:
         result = ParseResult(success=True, errors=[], recovered_errors=0)
 

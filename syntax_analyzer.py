@@ -55,8 +55,6 @@ class ParseResult:
 
 
 class SyntaxAnalyzer:
-    """Recursive-descent parser with panic-mode recovery (Airons style)."""
-
     TYPE_CODES = {
         TokenType.TYPE_INT.value,
         TokenType.TYPE_STRING.value,
