@@ -2,6 +2,8 @@ import os
 import sys
 
 from lexical_analyzer import Lexeme, LexicalAnalyzer
+from antlr_syntax_analyzer import AntlrSyntaxAnalyzer
+from syntax_analyzer import SyntaxAnalyzer, SyntaxError
 
 from PyQt6.QtCore import (
     QMimeData,
@@ -13,6 +15,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QAction,
+    QActionGroup,
     QColor,
     QDragEnterEvent,
     QDropEvent,
@@ -27,6 +30,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -109,13 +113,26 @@ TRANSLATIONS = {
             "или откройте файл (Ctrl+O)"
         ),
         "untitled": "Безымянный",
-        "errors_tab": "Лексемы",
+        "lexemes_tab": "Лексемы",
+        "errors_tab": "Ошибки",
         "output_tab": "Вывод",
         "log_tab": "Лог",
         "col_code": "Условный код",
         "col_lexeme_type": "Тип лексемы",
         "col_lexeme": "Лексема",
         "col_location": "Местоположение",
+        "col_error_fragment": "Неверный фрагмент",
+        "col_error_location": "Местоположение",
+        "col_error_description": "Описание ошибки",
+        "errors_count": "Общее количество ошибок:",
+        "no_errors": "Нет ошибок",
+        "no_errors_found": "Ошибок не найдено",
+        "no_code_for_analysis": "Не предоставлен код для анализа",
+        "analyzer_mode_menu": "Анализатор",
+        "analyzer_mode_label": "Анализатор:",
+        "analyzer_mode_recursive": "Рекурсивный спуск",
+        "analyzer_mode_antlr": "ANTLR",
+        "analyzer_mode_status": "Режим анализатора: {mode}",
         "col_line": "Строка",
         "col_column": "Столбец",
         "col_type": "Тип ошибки",
@@ -270,13 +287,26 @@ TRANSLATIONS = {
             "or open a file (Ctrl+O)"
         ),
         "untitled": "Untitled",
-        "errors_tab": "Lexemes",
+        "lexemes_tab": "Lexemes",
+        "errors_tab": "Errors",
         "output_tab": "Output",
         "log_tab": "Log",
         "col_code": "Token Code",
         "col_lexeme_type": "Token Type",
         "col_lexeme": "Lexeme",
         "col_location": "Location",
+        "col_error_fragment": "Incorrect Fragment",
+        "col_error_location": "Location",
+        "col_error_description": "Error Description",
+        "errors_count": "Total errors:",
+        "no_errors": "No errors",
+        "no_errors_found": "No errors found",
+        "no_code_for_analysis": "No code provided for analysis",
+        "analyzer_mode_menu": "Analyzer",
+        "analyzer_mode_label": "Analyzer:",
+        "analyzer_mode_recursive": "Recursive Descent",
+        "analyzer_mode_antlr": "ANTLR",
+        "analyzer_mode_status": "Analyzer mode: {mode}",
         "col_line": "Line",
         "col_column": "Column",
         "col_type": "Error Type",
@@ -687,8 +717,8 @@ class ResultTabWidget(QTabWidget):
         super().__init__(parent)
         self.setTabsClosable(False)
 
-
-        self.error_table = QTableWidget(0, 4, self)
+        # Errors table (only syntax errors)
+        self.error_table = QTableWidget(0, 3, self)
         self.error_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers
         )
@@ -699,22 +729,31 @@ class ResultTabWidget(QTabWidget):
         self.error_table.verticalHeader().setVisible(False)
         self._update_error_headers()
         self.error_table.cellClicked.connect(
-            self._on_error_double_click
+            self._on_error_click
         )
 
-
+        # Error count label
+        self.error_count_label = QLabel()
+        self.error_count_label.setText(tr("no_errors"))
+        self.error_count_label.setStyleSheet("font-weight: bold; padding: 8px;")
+        
+        # Error table container with label
+        error_container = QWidget()
+        error_layout = QVBoxLayout(error_container)
+        error_layout.setContentsMargins(0, 0, 0, 0)
+        error_layout.addWidget(self.error_table)
+        error_layout.addWidget(self.error_count_label)
+        
+        # Output and log widgets
         self.output_text = QPlainTextEdit(self)
         self.output_text.setReadOnly(True)
-
 
         self.log_text = QPlainTextEdit(self)
         self.log_text.setReadOnly(True)
 
-        self.addTab(self.error_table, tr("errors_tab"))
+        self.addTab(error_container, tr("errors_tab"))
         self.addTab(self.output_text, tr("output_tab"))
         self.addTab(self.log_text, tr("log_tab"))
-
-
 
     def retranslate(self) -> None:
         self.setTabText(0, tr("errors_tab"))
@@ -722,72 +761,79 @@ class ResultTabWidget(QTabWidget):
         self.setTabText(2, tr("log_tab"))
         self._update_error_headers()
 
-    def add_lexeme(self, lexeme: Lexeme) -> None:
+    def add_error(self, fragment: str, line: int, column: int, description: str) -> None:
+        """Add an error to the errors table"""
         row = self.error_table.rowCount()
         self.error_table.insertRow(row)
 
-        code_item = QTableWidgetItem(str(lexeme.code))
-        code_item.setData(Qt.ItemDataRole.UserRole, lexeme.line)
-        code_item.setData(Qt.ItemDataRole.UserRole + 1, lexeme.column_start)
+        # Store position data for navigation
+        fragment_item = QTableWidgetItem(fragment)
+        fragment_item.setData(Qt.ItemDataRole.UserRole, line)
+        fragment_item.setData(Qt.ItemDataRole.UserRole + 1, column)
 
         location = tr("location_format").format(
-            line=lexeme.line,
-            start=lexeme.column_start,
-            end=lexeme.column_end,
+            line=line,
+            start=column,
+            end=column,
         )
-        if lexeme.is_error:
-            location = (
-                f"{location} | {invalid_symbol_message(lexeme.lexeme)}"
-            )
 
-        shown_lexeme = lexeme.lexeme
-        if lexeme.code == 23:
-            shown_lexeme = space_lexeme_label()
+        self.error_table.setItem(row, 0, fragment_item)
+        self.error_table.setItem(row, 1, QTableWidgetItem(location))
+        self.error_table.setItem(row, 2, QTableWidgetItem(description))
 
-        self.error_table.setItem(row, 0, code_item)
-        self.error_table.setItem(
-            row,
-            1,
-            QTableWidgetItem(token_type_label(lexeme.code, lexeme.is_error)),
+    def add_syntax_error(self, error: SyntaxError) -> None:
+        """Add a syntax error to the errors table"""
+        self.add_error(
+            error.unexpected_lexeme,
+            error.line,
+            error.column_start,
+            error.message
         )
-        self.error_table.setItem(row, 2, QTableWidgetItem(shown_lexeme))
-        self.error_table.setItem(row, 3, QTableWidgetItem(location))
+
+    def update_error_count(self, error_count: int) -> None:
+        """Update the error count label"""
+        if error_count == 0:
+            text = tr("no_errors_found")
+        else:
+            text = f"{tr('errors_count')} {error_count}"
+        self.error_count_label.setText(text)
+
+    def set_no_code_message(self) -> None:
+        """Show state when editor text is empty"""
+        self.error_count_label.setText(tr("no_code_for_analysis"))
 
     def clear_errors(self) -> None:
         self.error_table.setRowCount(0)
+        self.error_count_label.setText(tr("no_errors"))
 
     def set_font_size(self, size: int) -> None:
-        for widget in (self.output_text, self.log_text):
+        for widget in (self.output_text, self.log_text, self.error_table):
             f = widget.font()
             f.setPointSize(size)
             widget.setFont(f)
-        tf = self.error_table.font()
-        tf.setPointSize(size)
-        self.error_table.setFont(tf)
-
-
+        lbl_font = self.error_count_label.font()
+        lbl_font.setPointSize(size)
+        self.error_count_label.setFont(lbl_font)
 
     def _update_error_headers(self) -> None:
         self.error_table.setHorizontalHeaderLabels([
-            tr("col_code"),
-            tr("col_lexeme_type"),
-            tr("col_lexeme"),
-            tr("col_location"),
+            tr("col_error_fragment"),
+            tr("col_error_location"),
+            tr("col_error_description"),
         ])
         header = self.error_table.horizontalHeader()
-        for i in range(3):
-            header.setSectionResizeMode(
-                i, QHeaderView.ResizeMode.ResizeToContents
-            )
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
 
-    def _on_error_double_click(self, row: int, _col: int) -> None:
-        code_item = self.error_table.item(row, 0)
-        if not code_item:
+    def _on_error_click(self, row: int, _col: int) -> None:
+        """Handle click on error table"""
+        item = self.error_table.item(row, 0)
+        if not item:
             return
 
-        line = code_item.data(Qt.ItemDataRole.UserRole)
-        col = code_item.data(Qt.ItemDataRole.UserRole + 1)
+        line = item.data(Qt.ItemDataRole.UserRole)
+        col = item.data(Qt.ItemDataRole.UserRole + 1)
         if isinstance(line, int) and isinstance(col, int):
             self.error_double_clicked.emit(line, col)
 
@@ -814,11 +860,16 @@ class CompilerWindow(QMainWindow):
         super().__init__()
         self.setAcceptDrops(True)
         self._font_size = self.DEFAULT_FONT_SIZE
+        self._analyzer_mode = "recursive"
         self._tabs_data: dict[int, TabData] = {}
         self.lexical_analyzer = LexicalAnalyzer()
+        self.antlr_syntax_analyzer = AntlrSyntaxAnalyzer()
+        self.syntax_analyzer = SyntaxAnalyzer()
         self._has_run_result = False
+        self._last_run_no_code = False
         self._last_run_tokens: list[Lexeme] = []
         self._last_run_errors = 0
+        self._last_run_syntax_errors: list[SyntaxError] = []
         self._last_run_lines = 0
         self._last_run_chars = 0
         self._output_history: list[tuple[str, str, dict]] = []
@@ -967,6 +1018,26 @@ class CompilerWindow(QMainWindow):
         self.action_run.triggered.connect(self.on_run)
         self.action_run.setIcon(QIcon.fromTheme("media-playback-start"))
 
+        self.action_mode_recursive = QAction(
+            tr("analyzer_mode_recursive"), self
+        )
+        self.action_mode_recursive.setCheckable(True)
+        self.action_mode_recursive.triggered.connect(
+            lambda: self._set_analyzer_mode("recursive")
+        )
+
+        self.action_mode_antlr = QAction(tr("analyzer_mode_antlr"), self)
+        self.action_mode_antlr.setCheckable(True)
+        self.action_mode_antlr.triggered.connect(
+            lambda: self._set_analyzer_mode("antlr")
+        )
+
+        self.analyzer_mode_group = QActionGroup(self)
+        self.analyzer_mode_group.setExclusive(True)
+        self.analyzer_mode_group.addAction(self.action_mode_recursive)
+        self.analyzer_mode_group.addAction(self.action_mode_antlr)
+        self._sync_analyzer_actions()
+
 
         self.action_find = QAction(tr("search_stub"), self)
         self.action_find.setShortcut(QKeySequence("Ctrl+F"))
@@ -1047,6 +1118,10 @@ class CompilerWindow(QMainWindow):
 
         self.run_menu = menu_bar.addMenu(tr("run_menu"))
         self.run_menu.addAction(self.action_run)
+        self.run_menu.addSeparator()
+        self.analyzer_menu = self.run_menu.addMenu(tr("analyzer_mode_menu"))
+        self.analyzer_menu.addAction(self.action_mode_recursive)
+        self.analyzer_menu.addAction(self.action_mode_antlr)
 
 
         self.lang_menu = menu_bar.addMenu(tr("language_menu"))
@@ -1099,6 +1174,22 @@ class CompilerWindow(QMainWindow):
         self.font_size_spin.valueChanged.connect(self._on_font_spin_changed)
         toolbar.addWidget(QLabel(" " + tr("font_label") + " "))
         toolbar.addWidget(self.font_size_spin)
+
+        toolbar.addSeparator()
+        toolbar.addWidget(QLabel(" " + tr("analyzer_mode_label") + " "))
+        self.analyzer_mode_combo = QComboBox(self)
+        self.analyzer_mode_combo.addItem(
+            tr("analyzer_mode_recursive"), "recursive"
+        )
+        self.analyzer_mode_combo.addItem(tr("analyzer_mode_antlr"), "antlr")
+        selected_index = (
+            1 if self._analyzer_mode == "antlr" else 0
+        )
+        self.analyzer_mode_combo.setCurrentIndex(selected_index)
+        self.analyzer_mode_combo.currentIndexChanged.connect(
+            self._on_analyzer_mode_combo_changed
+        )
+        toolbar.addWidget(self.analyzer_mode_combo)
 
         toolbar.addSeparator()
         toolbar.addAction(self.action_help)
@@ -1412,8 +1503,16 @@ class CompilerWindow(QMainWindow):
         self._output_history.clear()
         self._log_history.clear()
 
-        for token in self._last_run_tokens:
-            self.result_tabs.add_lexeme(token)
+        # Add syntax errors to errors table
+        for error in self._last_run_syntax_errors:
+            self.result_tabs.add_syntax_error(error)
+        
+        # Update errors panel summary message.
+        total_errors = len(self._last_run_syntax_errors)
+        if self._last_run_no_code:
+            self.result_tabs.set_no_code_message()
+        else:
+            self.result_tabs.update_error_count(total_errors)
 
         self.log_tr(
             "run_summary",
@@ -1606,6 +1705,7 @@ class CompilerWindow(QMainWindow):
         if not editor:
             self._has_run_result = False
             self._last_run_tokens = []
+            self._last_run_syntax_errors = []
             self._last_run_errors = 0
             self._last_run_lines = 0
             self._last_run_chars = 0
@@ -1613,10 +1713,18 @@ class CompilerWindow(QMainWindow):
             return
 
         text = editor.toPlainText()
+        self._last_run_no_code = not text.strip()
+        # Lexical analysis
         self._last_run_tokens = self.lexical_analyzer.analyze(text)
-        self._last_run_errors = sum(
-            1 for token in self._last_run_tokens if token.is_error
-        )
+        
+        # Syntax analysis using the explicitly selected mode.
+        if self._analyzer_mode == "antlr":
+            parse_result = self.antlr_syntax_analyzer.analyze_text(text)
+        else:
+            parse_result = self.syntax_analyzer.analyze(self._last_run_tokens)
+        self._last_run_syntax_errors = parse_result.errors
+        
+        self._last_run_errors = len(self._last_run_syntax_errors)
         self._last_run_lines = editor.blockCount()
         self._last_run_chars = len(text)
         self._has_run_result = True
@@ -1664,6 +1772,31 @@ class CompilerWindow(QMainWindow):
         _current_lang = lang
         self._retranslate_ui()
 
+    def _sync_analyzer_actions(self) -> None:
+        if self._analyzer_mode == "antlr":
+            self.action_mode_antlr.setChecked(True)
+        else:
+            self.action_mode_recursive.setChecked(True)
+
+    def _set_analyzer_mode(self, mode: str) -> None:
+        if mode not in {"recursive", "antlr"}:
+            return
+        if self._analyzer_mode == mode:
+            return
+        self._analyzer_mode = mode
+        self._sync_analyzer_actions()
+        mode_label = tr(
+            "analyzer_mode_antlr" if mode == "antlr" else "analyzer_mode_recursive"
+        )
+        self.statusBar().showMessage(
+            tr("analyzer_mode_status").format(mode=mode_label)
+        )
+
+    def _on_analyzer_mode_combo_changed(self, index: int) -> None:
+        mode = self.analyzer_mode_combo.itemData(index)
+        if isinstance(mode, str):
+            self._set_analyzer_mode(mode)
+
     def _retranslate_ui(self) -> None:
 
         action_keys = {
@@ -1690,6 +1823,8 @@ class CompilerWindow(QMainWindow):
             "action_references": "references",
             "action_source_code": "source_code",
             "action_run": "run",
+            "action_mode_recursive": "analyzer_mode_recursive",
+            "action_mode_antlr": "analyzer_mode_antlr",
             "action_find": "search_stub",
             "action_help": "help",
             "action_about": "about",
