@@ -4,6 +4,7 @@ import sys
 from lexical_analyzer import Lexeme, LexicalAnalyzer
 from antlr_syntax_analyzer import AntlrSyntaxAnalyzer
 from syntax_analyzer import SyntaxAnalyzer, SyntaxError
+from regex_search import RegexSearchMode, RegexSearchService, SearchMatch
 
 from PyQt6.QtCore import (
     QMimeData,
@@ -193,6 +194,20 @@ TRANSLATIONS = {
         "space_lexeme_label": "(пробел)",
         "invalid_symbol_template": "Недопустимый символ '{symbol}'",
         "search_stub": "Поиск…",
+        "search_mode_label": "Тип поиска:",
+        "search_mode_passport": "Серия и номер российского паспорта",
+        "search_mode_amex": "Карта Amex",
+        "search_mode_name": "ФИО на английском",
+        "search_run": "Поиск",
+        "search_results_tab": "Поиск",
+        "col_search_match": "Найденная подстрока",
+        "col_search_position": "Начальная позиция",
+        "col_search_length": "Длина",
+        "search_count": "Найдено совпадений: {count}",
+        "search_no_matches": "Совпадений не найдено",
+        "search_no_data": "Нет данных для поиска",
+        "search_done": "Поиск завершен. Совпадений: {count}",
+        "search_position_format": "строка {line}, символ {col}",
         "lang_ru": "Русский",
         "lang_en": "English",
         "toolbar_name": "Основная",
@@ -365,6 +380,20 @@ TRANSLATIONS = {
         "space_lexeme_label": "(space)",
         "invalid_symbol_template": "Invalid symbol '{symbol}'",
         "search_stub": "Find…",
+        "search_mode_label": "Search type:",
+        "search_mode_passport": "Russian passport series and number",
+        "search_mode_amex": "Amex card",
+        "search_mode_name": "English full name",
+        "search_run": "Search",
+        "search_results_tab": "Search",
+        "col_search_match": "Matched substring",
+        "col_search_position": "Start position",
+        "col_search_length": "Length",
+        "search_count": "Matches found: {count}",
+        "search_no_matches": "No matches found",
+        "search_no_data": "No data to search",
+        "search_done": "Search finished. Matches: {count}",
+        "search_position_format": "line {line}, symbol {col}",
         "lang_ru": "Русский",
         "lang_en": "English",
         "toolbar_name": "Main",
@@ -712,6 +741,7 @@ class AboutDialog(QDialog):
 
 class ResultTabWidget(QTabWidget):
     error_double_clicked = pyqtSignal(int, int)
+    search_double_clicked = pyqtSignal(int, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -751,15 +781,40 @@ class ResultTabWidget(QTabWidget):
         self.log_text = QPlainTextEdit(self)
         self.log_text.setReadOnly(True)
 
+        # Search results table
+        self.search_table = QTableWidget(0, 3, self)
+        self.search_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+        self.search_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self.search_table.verticalHeader().setVisible(False)
+        self._update_search_headers()
+        self.search_table.cellClicked.connect(self._on_search_click)
+
+        self.search_count_label = QLabel()
+        self.search_count_label.setText(tr("search_no_matches"))
+        self.search_count_label.setStyleSheet("font-weight: bold; padding: 8px;")
+
+        search_container = QWidget()
+        search_layout = QVBoxLayout(search_container)
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.addWidget(self.search_table)
+        search_layout.addWidget(self.search_count_label)
+
         self.addTab(error_container, tr("errors_tab"))
         self.addTab(self.output_text, tr("output_tab"))
         self.addTab(self.log_text, tr("log_tab"))
+        self.addTab(search_container, tr("search_results_tab"))
 
     def retranslate(self) -> None:
         self.setTabText(0, tr("errors_tab"))
         self.setTabText(1, tr("output_tab"))
         self.setTabText(2, tr("log_tab"))
+        self.setTabText(3, tr("search_results_tab"))
         self._update_error_headers()
+        self._update_search_headers()
 
     def add_error(self, fragment: str, line: int, column: int, description: str) -> None:
         """Add an error to the errors table"""
@@ -806,14 +861,54 @@ class ResultTabWidget(QTabWidget):
         self.error_table.setRowCount(0)
         self.error_count_label.setText(tr("no_errors"))
 
+    def clear_search_results(self) -> None:
+        self.search_table.setRowCount(0)
+        self.search_count_label.setText(tr("search_no_matches"))
+
+    def set_search_no_data(self) -> None:
+        self.search_table.setRowCount(0)
+        self.search_count_label.setText(tr("search_no_data"))
+
+    def set_search_results(self, matches: list[SearchMatch]) -> None:
+        self.search_table.setRowCount(0)
+        if not matches:
+            self.search_count_label.setText(tr("search_no_matches"))
+            return
+
+        for match in matches:
+            row = self.search_table.rowCount()
+            self.search_table.insertRow(row)
+
+            value_item = QTableWidgetItem(match.value)
+            value_item.setData(Qt.ItemDataRole.UserRole, match.start)
+            value_item.setData(Qt.ItemDataRole.UserRole + 1, match.length)
+            self.search_table.setItem(row, 0, value_item)
+
+            position_text = tr("search_position_format").format(
+                line=match.line,
+                col=match.column,
+            )
+            self.search_table.setItem(row, 1, QTableWidgetItem(position_text))
+            self.search_table.setItem(row, 2, QTableWidgetItem(str(match.length)))
+
+        self.search_count_label.setText(
+            tr("search_count").format(count=len(matches))
+        )
+
     def set_font_size(self, size: int) -> None:
-        for widget in (self.output_text, self.log_text, self.error_table):
+        for widget in (
+            self.output_text,
+            self.log_text,
+            self.error_table,
+            self.search_table,
+        ):
             f = widget.font()
             f.setPointSize(size)
             widget.setFont(f)
         lbl_font = self.error_count_label.font()
         lbl_font.setPointSize(size)
         self.error_count_label.setFont(lbl_font)
+        self.search_count_label.setFont(lbl_font)
 
     def _update_error_headers(self) -> None:
         self.error_table.setHorizontalHeaderLabels([
@@ -826,6 +921,17 @@ class ResultTabWidget(QTabWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
 
+    def _update_search_headers(self) -> None:
+        self.search_table.setHorizontalHeaderLabels([
+            tr("col_search_match"),
+            tr("col_search_position"),
+            tr("col_search_length"),
+        ])
+        header = self.search_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+
     def _on_error_click(self, row: int, _col: int) -> None:
         """Handle click on error table"""
         item = self.error_table.item(row, 0)
@@ -836,6 +942,16 @@ class ResultTabWidget(QTabWidget):
         col = item.data(Qt.ItemDataRole.UserRole + 1)
         if isinstance(line, int) and isinstance(col, int):
             self.error_double_clicked.emit(line, col)
+
+    def _on_search_click(self, row: int, _col: int) -> None:
+        item = self.search_table.item(row, 0)
+        if not item:
+            return
+
+        start = item.data(Qt.ItemDataRole.UserRole)
+        length = item.data(Qt.ItemDataRole.UserRole + 1)
+        if isinstance(start, int) and isinstance(length, int):
+            self.search_double_clicked.emit(start, length)
 
 
 
@@ -865,6 +981,7 @@ class CompilerWindow(QMainWindow):
         self.lexical_analyzer = LexicalAnalyzer()
         self.antlr_syntax_analyzer = AntlrSyntaxAnalyzer()
         self.syntax_analyzer = SyntaxAnalyzer()
+        self.regex_search_service = RegexSearchService()
         self._has_run_result = False
         self._last_run_no_code = False
         self._last_run_tokens: list[Lexeme] = []
@@ -1039,9 +1156,9 @@ class CompilerWindow(QMainWindow):
         self._sync_analyzer_actions()
 
 
-        self.action_find = QAction(tr("search_stub"), self)
+        self.action_find = QAction(tr("search_run"), self)
         self.action_find.setShortcut(QKeySequence("Ctrl+F"))
-        self.action_find.triggered.connect(self._on_find_stub)
+        self.action_find.triggered.connect(self.on_regex_search)
 
 
         self.action_help = QAction(
@@ -1192,6 +1309,24 @@ class CompilerWindow(QMainWindow):
         toolbar.addWidget(self.analyzer_mode_combo)
 
         toolbar.addSeparator()
+        toolbar.addWidget(QLabel(" " + tr("search_mode_label") + " "))
+        self.search_mode_combo = QComboBox(self)
+        self.search_mode_combo.addItem(
+            tr("search_mode_passport"),
+            RegexSearchMode.RUSSIAN_PASSPORT,
+        )
+        self.search_mode_combo.addItem(
+            tr("search_mode_amex"),
+            RegexSearchMode.AMEX_CARD,
+        )
+        self.search_mode_combo.addItem(
+            tr("search_mode_name"),
+            RegexSearchMode.ENGLISH_NAME,
+        )
+        toolbar.addWidget(self.search_mode_combo)
+        toolbar.addAction(self.action_find)
+
+        toolbar.addSeparator()
         toolbar.addAction(self.action_help)
         toolbar.addAction(self.action_about)
 
@@ -1233,6 +1368,7 @@ class CompilerWindow(QMainWindow):
 
         self.result_tabs = ResultTabWidget(self)
         self.result_tabs.error_double_clicked.connect(self._on_error_go_to)
+        self.result_tabs.search_double_clicked.connect(self._on_search_go_to)
 
 
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -1744,12 +1880,68 @@ class CompilerWindow(QMainWindow):
             editor.centerCursor()
             editor.setFocus()
 
+    def _highlight_range(self, start: int, length: int) -> None:
+        editor = self._current_editor()
+        if not editor:
+            return
+
+        cursor = editor.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(start + length, QTextCursor.MoveMode.KeepAnchor)
+        editor.setTextCursor(cursor)
+        editor.centerCursor()
+
+        selection = QTextEdit.ExtraSelection()
+        selection.cursor = cursor
+        selection.format.setBackground(QColor("#ffef99"))
+        selection.format.setProperty(
+            QTextFormat.Property.FullWidthSelection,
+            False,
+        )
+        editor.setExtraSelections([selection])
+        editor.setFocus()
+
+    def _clear_highlight(self) -> None:
+        editor = self._current_editor()
+        if editor:
+            editor.setExtraSelections([])
+
+    def _on_search_go_to(self, start: int, length: int) -> None:
+        self._highlight_range(start, length)
 
 
 
 
-    def _on_find_stub(self) -> None:
-        self.statusBar().showMessage(tr("search_stub"))
+
+    def on_regex_search(self) -> None:
+        editor = self._current_editor()
+        self.result_tabs.clear_search_results()
+        self._clear_highlight()
+
+        if not editor:
+            self.statusBar().showMessage(tr("run_no_active_editor"))
+            self.result_tabs.setCurrentIndex(3)
+            return
+
+        text = editor.toPlainText()
+        if not text.strip():
+            self.result_tabs.set_search_no_data()
+            self.result_tabs.setCurrentIndex(3)
+            self.statusBar().showMessage(tr("search_no_data"))
+            return
+
+        mode_data = self.search_mode_combo.currentData()
+        mode = (
+            mode_data
+            if isinstance(mode_data, RegexSearchMode)
+            else RegexSearchMode.AMEX_CARD
+        )
+        matches = self.regex_search_service.find(text, mode)
+        self.result_tabs.set_search_results(matches)
+        self.result_tabs.setCurrentIndex(3)
+        self.statusBar().showMessage(
+            tr("search_done").format(count=len(matches))
+        )
 
 
 
@@ -1825,7 +2017,7 @@ class CompilerWindow(QMainWindow):
             "action_run": "run",
             "action_mode_recursive": "analyzer_mode_recursive",
             "action_mode_antlr": "analyzer_mode_antlr",
-            "action_find": "search_stub",
+            "action_find": "search_run",
             "action_help": "help",
             "action_about": "about",
             "action_lang_ru": "lang_ru",
