@@ -7,8 +7,9 @@ from enum import Enum
 
 
 class RegexSearchMode(str, Enum):
+    RUSSIAN_PASSPORT = "russian_passport"
     AMEX_CARD = "amex_card"
-    AMEX_CARD_AUTOMATON = "amex_card_automaton"
+    ENGLISH_NAME = "english_name"
 
 
 @dataclass(frozen=True)
@@ -21,28 +22,39 @@ class SearchMatch:
 
 
 class RegexSearchService:
+    _PASSPORT_PATTERN = re.compile(r"\d{2}\s?\d{2}\s?\d{6}")
     # Adapted from ^3[47]\d{2}[ -]?\d{6}[ -]?\d{5}$ for substring search in text.
     _AMEX_PATTERN = re.compile(r"3[47]\d{2}[ -]?\d{6}[ -]?\d{5}")
+    _ENGLISH_NAME_PATTERN = re.compile(
+        r"[A-Z][a-z]+,\s[A-Z][a-z]+\s[A-Z][a-z]+"
+    )
 
     def mode_items(self) -> list[tuple[RegexSearchMode, str]]:
         return [
-            (RegexSearchMode.AMEX_CARD, "Amex Card (Regex)"),
-            (RegexSearchMode.AMEX_CARD_AUTOMATON, "Amex Card (Automaton)"),
+            (RegexSearchMode.RUSSIAN_PASSPORT, "Russian passport"),
+            (RegexSearchMode.AMEX_CARD, "Amex card"),
+            (RegexSearchMode.ENGLISH_NAME, "English full name"),
         ]
 
     def find(self, text: str, mode: RegexSearchMode) -> list[SearchMatch]:
+        if mode == RegexSearchMode.RUSSIAN_PASSPORT:
+            return self.find_russian_passport(text)
         if mode == RegexSearchMode.AMEX_CARD:
             return self.find_amex_regex(text)
-        if mode == RegexSearchMode.AMEX_CARD_AUTOMATON:
-            return self.find_amex_automaton(text)
+        if mode == RegexSearchMode.ENGLISH_NAME:
+            return self.find_english_name(text)
         return []
 
+    def find_russian_passport(self, text: str) -> list[SearchMatch]:
+        return _collect_numeric_matches(text, self._PASSPORT_PATTERN)
+
     def find_amex_regex(self, text: str) -> list[SearchMatch]:
+        return _collect_numeric_matches(text, self._AMEX_PATTERN)
+
+    def find_english_name(self, text: str) -> list[SearchMatch]:
         line_starts = _build_line_starts(text)
         matches: list[SearchMatch] = []
-        for match in self._AMEX_PATTERN.finditer(text):
-            if not _has_valid_right_boundary(text, match.end()):
-                continue
+        for match in self._ENGLISH_NAME_PATTERN.finditer(text):
             start = match.start()
             line, column = _offset_to_line_col(start, line_starts)
             matches.append(
@@ -54,36 +66,6 @@ class RegexSearchService:
                     column=column,
                 )
             )
-        return matches
-
-    def find_amex_automaton(self, text: str) -> list[SearchMatch]:
-        line_starts = _build_line_starts(text)
-        matches: list[SearchMatch] = []
-        i = 0
-        n = len(text)
-
-        while i < n:
-            if text[i] != "3":
-                i += 1
-                continue
-
-            length = _consume_amex_from_index(text, i)
-            if length == 0:
-                i += 1
-                continue
-
-            line, column = _offset_to_line_col(i, line_starts)
-            matches.append(
-                SearchMatch(
-                    value=text[i : i + length],
-                    start=i,
-                    length=length,
-                    line=line,
-                    column=column,
-                )
-            )
-            i += length
-
         return matches
 
 
@@ -101,51 +83,47 @@ def _offset_to_line_col(offset: int, line_starts: list[int]) -> tuple[int, int]:
     return line_index + 1, (offset - line_start) + 1
 
 
-def _consume_amex_from_index(text: str, start: int) -> int:
-    n = len(text)
-    i = start
+def _collect_numeric_matches(
+    text: str,
+    pattern: re.Pattern[str],
+) -> list[SearchMatch]:
+    line_starts = _build_line_starts(text)
+    matches: list[SearchMatch] = []
+    previous_end = -1
 
-    if i >= n or text[i] != "3":
-        return 0
-    i += 1
+    for match in pattern.finditer(text):
+        start = match.start()
+        end = match.end()
 
-    if i >= n or text[i] not in {"4", "7"}:
-        return 0
-    i += 1
+        if start > 0 and text[start - 1].isdigit() and start != previous_end:
+            continue
+        if not _has_valid_right_boundary(text, end, pattern):
+            continue
 
-    for _ in range(2):
-        if i >= n or not text[i].isdigit():
-            return 0
-        i += 1
+        line, column = _offset_to_line_col(start, line_starts)
+        matches.append(
+            SearchMatch(
+                value=match.group(0),
+                start=start,
+                length=end - start,
+                line=line,
+                column=column,
+            )
+        )
+        previous_end = end
 
-    if i < n and text[i] in {" ", "-"}:
-        i += 1
-
-    for _ in range(6):
-        if i >= n or not text[i].isdigit():
-            return 0
-        i += 1
-
-    if i < n and text[i] in {" ", "-"}:
-        i += 1
-
-    for _ in range(5):
-        if i >= n or not text[i].isdigit():
-            return 0
-        i += 1
-
-    if not _has_valid_right_boundary(text, i):
-        return 0
-
-    return i - start
+    return matches
 
 
-def _has_valid_right_boundary(text: str, end: int) -> bool:
-    """Allow end-of-text, non-digit boundary, or immediate start of next Amex."""
+def _has_valid_right_boundary(
+    text: str,
+    end: int,
+    pattern: re.Pattern[str],
+) -> bool:
     if end >= len(text):
         return True
 
     if not text[end].isdigit():
         return True
 
-    return end + 1 < len(text) and text[end] == "3" and text[end + 1] in {"4", "7"}
+    return pattern.match(text, end) is not None

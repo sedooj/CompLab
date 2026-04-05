@@ -194,9 +194,10 @@ TRANSLATIONS = {
         "space_lexeme_label": "(пробел)",
         "invalid_symbol_template": "Недопустимый символ '{symbol}'",
         "search_stub": "Поиск…",
-        "search_mode_label": "РВ:",
-        "search_mode_amex": "Номер карты Amex",
-        "search_mode_amex_automaton": "Номер карты Amex (автомат)",
+        "search_mode_label": "Тип поиска:",
+        "search_mode_passport": "Серия и номер российского паспорта",
+        "search_mode_amex": "Карта Amex",
+        "search_mode_name": "ФИО на английском",
         "search_run": "Поиск",
         "search_results_tab": "Поиск",
         "col_search_match": "Найденная подстрока",
@@ -379,9 +380,10 @@ TRANSLATIONS = {
         "space_lexeme_label": "(space)",
         "invalid_symbol_template": "Invalid symbol '{symbol}'",
         "search_stub": "Find…",
-        "search_mode_label": "Regex:",
-        "search_mode_amex": "Amex card number",
-        "search_mode_amex_automaton": "Amex card number (automaton)",
+        "search_mode_label": "Search type:",
+        "search_mode_passport": "Russian passport series and number",
+        "search_mode_amex": "Amex card",
+        "search_mode_name": "English full name",
         "search_run": "Search",
         "search_results_tab": "Search",
         "col_search_match": "Matched substring",
@@ -1310,12 +1312,16 @@ class CompilerWindow(QMainWindow):
         toolbar.addWidget(QLabel(" " + tr("search_mode_label") + " "))
         self.search_mode_combo = QComboBox(self)
         self.search_mode_combo.addItem(
+            tr("search_mode_passport"),
+            RegexSearchMode.RUSSIAN_PASSPORT,
+        )
+        self.search_mode_combo.addItem(
             tr("search_mode_amex"),
             RegexSearchMode.AMEX_CARD,
         )
         self.search_mode_combo.addItem(
-            tr("search_mode_amex_automaton"),
-            RegexSearchMode.AMEX_CARD_AUTOMATON,
+            tr("search_mode_name"),
+            RegexSearchMode.ENGLISH_NAME,
         )
         toolbar.addWidget(self.search_mode_combo)
         toolbar.addAction(self.action_find)
