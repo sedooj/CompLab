@@ -126,6 +126,8 @@ TRANSLATIONS = {
         "col_error_description": "Описание ошибки",
         "errors_count": "Общее количество ошибок:",
         "no_errors": "Нет ошибок",
+        "no_errors_found": "Ошибок не найдено",
+        "no_code_for_analysis": "Не предоставлен код для анализа",
         "analyzer_mode_menu": "Анализатор",
         "analyzer_mode_label": "Анализатор:",
         "analyzer_mode_recursive": "Рекурсивный спуск",
@@ -298,6 +300,8 @@ TRANSLATIONS = {
         "col_error_description": "Error Description",
         "errors_count": "Total errors:",
         "no_errors": "No errors",
+        "no_errors_found": "No errors found",
+        "no_code_for_analysis": "No code provided for analysis",
         "analyzer_mode_menu": "Analyzer",
         "analyzer_mode_label": "Analyzer:",
         "analyzer_mode_recursive": "Recursive Descent",
@@ -789,10 +793,14 @@ class ResultTabWidget(QTabWidget):
     def update_error_count(self, error_count: int) -> None:
         """Update the error count label"""
         if error_count == 0:
-            text = tr("no_errors")
+            text = tr("no_errors_found")
         else:
             text = f"{tr('errors_count')} {error_count}"
         self.error_count_label.setText(text)
+
+    def set_no_code_message(self) -> None:
+        """Show state when editor text is empty"""
+        self.error_count_label.setText(tr("no_code_for_analysis"))
 
     def clear_errors(self) -> None:
         self.error_table.setRowCount(0)
@@ -858,6 +866,7 @@ class CompilerWindow(QMainWindow):
         self.antlr_syntax_analyzer = AntlrSyntaxAnalyzer()
         self.syntax_analyzer = SyntaxAnalyzer()
         self._has_run_result = False
+        self._last_run_no_code = False
         self._last_run_tokens: list[Lexeme] = []
         self._last_run_errors = 0
         self._last_run_syntax_errors: list[SyntaxError] = []
@@ -1498,9 +1507,12 @@ class CompilerWindow(QMainWindow):
         for error in self._last_run_syntax_errors:
             self.result_tabs.add_syntax_error(error)
         
-        # Update error count
+        # Update errors panel summary message.
         total_errors = len(self._last_run_syntax_errors)
-        self.result_tabs.update_error_count(total_errors)
+        if self._last_run_no_code:
+            self.result_tabs.set_no_code_message()
+        else:
+            self.result_tabs.update_error_count(total_errors)
 
         self.log_tr(
             "run_summary",
@@ -1701,6 +1713,7 @@ class CompilerWindow(QMainWindow):
             return
 
         text = editor.toPlainText()
+        self._last_run_no_code = not text.strip()
         # Lexical analysis
         self._last_run_tokens = self.lexical_analyzer.analyze(text)
         

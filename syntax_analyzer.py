@@ -126,6 +126,44 @@ class SyntaxAnalyzer:
             self.current_pos += 1
         return lex
 
+    @staticmethod
+    def _looks_like_val_typo(text: str) -> bool:
+        candidate = (text or "").strip().lower()
+        target = "val"
+
+        # Fast path for very common keyboard transposition: vla.
+        if candidate == "vla":
+            return True
+
+        if abs(len(candidate) - len(target)) > 1:
+            return False
+
+        i = 0
+        j = 0
+        mismatches = 0
+        while i < len(candidate) and j < len(target):
+            if candidate[i] == target[j]:
+                i += 1
+                j += 1
+                continue
+
+            mismatches += 1
+            if mismatches > 1:
+                return False
+
+            if len(candidate) == len(target):
+                i += 1
+                j += 1
+            elif len(candidate) > len(target):
+                i += 1
+            else:
+                j += 1
+
+        if i < len(candidate) or j < len(target):
+            mismatches += 1
+
+        return mismatches <= 1
+
     def _synchronize(self, sync_tokens: set[int]) -> None:
         while self.current_pos < len(self.lexemes):
             if self._peek_code() in sync_tokens:
@@ -184,9 +222,14 @@ class SyntaxAnalyzer:
         # <START> -> 'val' <IDENTIFIER> ':' <ARG_LIST> '->' <TYPE> '=' '{' ... '}' ';'
         if self._peek_code() != TokenType.KEYWORD_VAL.value:
             if self._peek_code() == TokenType.IDENTIFIER.value:
-                # Treat one unexpected identifier at start as a typo of 'val'.
                 self._error("Ожидалось 'val'", "'val'")
-                self._advance()
+                # If token looks like a typo of 'val' (e.g. "vala"), consume it.
+                # Otherwise keep it as function identifier to avoid a false
+                # secondary error "Ожидалось имя функции".
+                current = self._current_lexeme()
+                text = current.lexeme if current is not None else ""
+                if self._looks_like_val_typo(text):
+                    self._advance()
             else:
                 # Count each unexpected leading symbol as a separate real error.
                 while (
@@ -204,7 +247,15 @@ class SyntaxAnalyzer:
         else:
             self._advance()
 
-        self._parse_identifier()
+        identifier_ok = self._parse_identifier()
+        if not identifier_ok:
+            # Recover from a bad/missing function name without immediately
+            # emitting a cascade ':' error on the same malformed token.
+            while (
+                self._current_lexeme() is not None
+                and self._peek_code() not in {TokenType.COLON.value, TokenType.LPAREN.value}
+            ):
+                self._advance()
 
         if self._peek_code() != TokenType.COLON.value:
             self._error("Ожидалось ':'", "':'")
@@ -221,11 +272,12 @@ class SyntaxAnalyzer:
         if body_closed:
             self._parse_end()
 
-    def _parse_identifier(self) -> None:
+    def _parse_identifier(self) -> bool:
         if self._peek_code() != TokenType.IDENTIFIER.value:
             self._error("Ожидалось имя функции", "идентификатор")
-            return
+            return False
         self._advance()
+        return True
 
     def _parse_type(self) -> bool:
         if self._peek_code() in self.TYPE_CODES:
@@ -304,7 +356,10 @@ class SyntaxAnalyzer:
             if self._peek_code() == TokenType.LBRACE.value:
                 self._advance()
             else:
-                # Consume trailing ';' if present to avoid duplicate tail errors.
+                # Consume closing markers to avoid cascade of trailing token errors
+                # after a single missing opening brace.
+                if self._peek_code() == TokenType.RBRACE.value:
+                    self._advance()
                 if self._peek_code() == TokenType.SEMICOLON.value:
                     self._advance()
                 return False
@@ -361,16 +416,32 @@ class SyntaxAnalyzer:
             if self._peek_code() == TokenType.IDENTIFIER.value:
                 self._advance()
 
+        while self._peek_code() == TokenType.IDENTIFIER.value:
+            self._error("Ожидалась ',' между параметрами", "','")
+            self._advance()
+
     def _parse_expr(self) -> None:
         self._parse_term()
         while self._peek_code() in {TokenType.PLUS.value, TokenType.MINUS.value}:
             self._advance()
+            if self._peek_code() in self.OPERATOR_CODES:
+                self._error("Ожидалось выражение после оператора", "выражение")
+                while self._peek_code() in self.OPERATOR_CODES:
+                    self._advance()
+                if self._peek_code() not in self.EXPR_START_CODES:
+                    return
             self._parse_term()
 
     def _parse_term(self) -> None:
         self._parse_factor()
         while self._peek_code() in {TokenType.MULTIPLY.value, TokenType.DIVIDE.value, TokenType.MODULO.value}:
             self._advance()
+            if self._peek_code() in self.OPERATOR_CODES:
+                self._error("Ожидалось выражение после оператора", "выражение")
+                while self._peek_code() in self.OPERATOR_CODES:
+                    self._advance()
+                if self._peek_code() not in self.EXPR_START_CODES:
+                    return
             self._parse_factor()
 
     def _parse_factor(self) -> None:
@@ -392,6 +463,10 @@ class SyntaxAnalyzer:
             return
 
         self._error("Ожидалось число, идентификатор или '('", "выражение")
+        # Keep structural closers for outer rules to avoid cascades like
+        # missing ')' -> missing '}' on the same malformed tail.
+        if code in {TokenType.RPAREN.value, TokenType.RBRACE.value, TokenType.SEMICOLON.value}:
+            return
         if self._current_lexeme() is not None:
             self._advance()
 
