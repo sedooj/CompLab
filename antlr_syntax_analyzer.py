@@ -24,7 +24,7 @@ class _CollectingErrorListener(ErrorListener):
         super().__init__()
         self.errors: List[_RawError] = []
 
-    def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):  # noqa: N802
+    def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
         lexeme = "<конец файла>"
         end_col = column + 1
 
@@ -36,7 +36,6 @@ class _CollectingErrorListener(ErrorListener):
 
         message = msg or "Синтаксическая ошибка"
 
-        # Lexer errors may not have offendingSymbol; extract bad symbol from message.
         bad_symbol = re.search(r"token recognition error at:\s*'([^']+)'", message)
         if bad_symbol is not None:
             lexeme = bad_symbol.group(1)

@@ -23,7 +23,6 @@ class SearchMatch:
 
 class RegexSearchService:
     _PASSPORT_PATTERN = re.compile(r"\d{2}\s?\d{2}\s?\d{6}")
-    # Adapted from ^3[47]\d{2}[ -]?\d{6}[ -]?\d{5}$ for substring search in text.
     _AMEX_PATTERN = re.compile(r"3[47]\d{2}[ -]?\d{6}[ -]?\d{5}")
     _ENGLISH_NAME_PATTERN = re.compile(
         r"[A-Z][a-z]+,\s[A-Z][a-z]+\s[A-Z][a-z]+"

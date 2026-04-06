@@ -747,7 +747,6 @@ class ResultTabWidget(QTabWidget):
         super().__init__(parent)
         self.setTabsClosable(False)
 
-        # Errors table (only syntax errors)
         self.error_table = QTableWidget(0, 3, self)
         self.error_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers
@@ -762,26 +761,22 @@ class ResultTabWidget(QTabWidget):
             self._on_error_click
         )
 
-        # Error count label
         self.error_count_label = QLabel()
         self.error_count_label.setText(tr("no_errors"))
         self.error_count_label.setStyleSheet("font-weight: bold; padding: 8px;")
         
-        # Error table container with label
         error_container = QWidget()
         error_layout = QVBoxLayout(error_container)
         error_layout.setContentsMargins(0, 0, 0, 0)
         error_layout.addWidget(self.error_table)
         error_layout.addWidget(self.error_count_label)
         
-        # Output and log widgets
         self.output_text = QPlainTextEdit(self)
         self.output_text.setReadOnly(True)
 
         self.log_text = QPlainTextEdit(self)
         self.log_text.setReadOnly(True)
 
-        # Search results table
         self.search_table = QTableWidget(0, 3, self)
         self.search_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers
@@ -821,7 +816,6 @@ class ResultTabWidget(QTabWidget):
         row = self.error_table.rowCount()
         self.error_table.insertRow(row)
 
-        # Store position data for navigation
         fragment_item = QTableWidgetItem(fragment)
         fragment_item.setData(Qt.ItemDataRole.UserRole, line)
         fragment_item.setData(Qt.ItemDataRole.UserRole + 1, column)
@@ -1639,11 +1633,9 @@ class CompilerWindow(QMainWindow):
         self._output_history.clear()
         self._log_history.clear()
 
-        # Add syntax errors to errors table
         for error in self._last_run_syntax_errors:
             self.result_tabs.add_syntax_error(error)
         
-        # Update errors panel summary message.
         total_errors = len(self._last_run_syntax_errors)
         if self._last_run_no_code:
             self.result_tabs.set_no_code_message()
@@ -1850,10 +1842,8 @@ class CompilerWindow(QMainWindow):
 
         text = editor.toPlainText()
         self._last_run_no_code = not text.strip()
-        # Lexical analysis
         self._last_run_tokens = self.lexical_analyzer.analyze(text)
         
-        # Syntax analysis using the explicitly selected mode.
         if self._analyzer_mode == "antlr":
             parse_result = self.antlr_syntax_analyzer.analyze_text(text)
         else:
