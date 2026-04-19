@@ -1,0 +1,21 @@
+# OS and editor noise
+.DS_Store
+.idea/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+
+# Build and packaging outputs
+build/
+dist/
+antlr_generated/
+
+# Local lab artifacts and scratch files
+tests/
+tools/
+demo_errors.py
+integration_test.py
+main.spec
+run_tests.sh
+test_*.py

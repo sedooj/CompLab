@@ -1,10 +1,26 @@
+from __future__ import annotations
+
 import os
 import sys
+from dataclasses import dataclass, field
 
 from lexical_analyzer import Lexeme, LexicalAnalyzer
 from antlr_syntax_analyzer import AntlrSyntaxAnalyzer
 from syntax_analyzer import SyntaxAnalyzer, SyntaxError
-from regex_search import RegexSearchMode, RegexSearchService, SearchMatch
+from semantic_analyzer import (
+    BinaryOpNode,
+    FunctionTypeNode,
+    ExprNode,
+    IdentifierNode,
+    IntLiteralNode,
+    LambdaNode,
+    ParamNode,
+    ProgramNode,
+    SemanticAnalyzer,
+    TypeNode,
+    ValDeclNode,
+    format_ast_tree,
+)
 
 from PyQt6.QtCore import (
     QMimeData,
@@ -17,6 +33,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QAction,
     QActionGroup,
+    QBrush,
     QColor,
     QDragEnterEvent,
     QDropEvent,
@@ -27,7 +44,11 @@ from PyQt6.QtGui import (
     QSyntaxHighlighter,
     QTextCharFormat,
     QTextCursor,
-    QTextFormat, QIcon,
+    QTextFormat,
+    QIcon,
+    QPen,
+    QPixmap,
+    QWheelEvent,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -35,6 +56,8 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QGraphicsScene,
+    QGraphicsView,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -105,7 +128,7 @@ TRANSLATIONS = {
         ),
         "open_file_title": "Открыть файл",
         "save_as_title": "Сохранить как",
-        "file_filters": "Текстовые файлы (*.txt);;Все файлы (*.*)",
+        "file_filters": "Файлы Kotlin (*.kt);;Все файлы (*.*)",
         "file_open_error": "Не удалось открыть файл:\n{err}",
         "file_save_error": "Не удалось сохранить файл:\n{err}",
         "editor_placeholder": "Введите текст программы…",
@@ -149,8 +172,12 @@ TRANSLATIONS = {
             "Распознано лексем: {tokens}. "
             "Ошибок: {errors}. Строк: {lines}, символов: {chars}."
         ),
-        "run_done_ok": "Лексический анализ завершен без ошибок",
-        "run_done_with_errors": "Лексический анализ завершен. Ошибок: {errors}",
+        "run_done_ok": "Анализ завершен без ошибок",
+        "run_done_with_errors": "Анализ завершен. Ошибок: {errors}",
+        "show_ast": "AST",
+        "show_ast_no_data": "AST пока недоступно. Выполните анализ корректной строки.",
+        "ast_output_header": "AST (текстовое представление):",
+        "ast_output_unavailable": "AST не построено из-за ошибок синтаксиса или лексики.",
         "analyzer_stub": (
             "[Пуск] Анализатор (заглушка) — демонстрационные ошибки добавлены."
         ),
@@ -193,21 +220,8 @@ TRANSLATIONS = {
         },
         "space_lexeme_label": "(пробел)",
         "invalid_symbol_template": "Недопустимый символ '{symbol}'",
-        "search_stub": "Поиск…",
-        "search_mode_label": "Тип поиска:",
-        "search_mode_passport": "Серия и номер российского паспорта",
-        "search_mode_amex": "Карта Amex",
-        "search_mode_name": "ФИО на английском",
-        "search_run": "Поиск",
-        "search_results_tab": "Поиск",
-        "col_search_match": "Найденная подстрока",
-        "col_search_position": "Начальная позиция",
-        "col_search_length": "Длина",
-        "search_count": "Найдено совпадений: {count}",
-        "search_no_matches": "Совпадений не найдено",
-        "search_no_data": "Нет данных для поиска",
-        "search_done": "Поиск завершен. Совпадений: {count}",
-        "search_position_format": "строка {line}, символ {col}",
+        "ast_results_tab": "AST",
+        "ast_no_data": "AST пока недоступно",
         "lang_ru": "Русский",
         "lang_en": "English",
         "toolbar_name": "Основная",
@@ -293,7 +307,7 @@ TRANSLATIONS = {
         ),
         "open_file_title": "Open File",
         "save_as_title": "Save As",
-        "file_filters": "Text Files (*.txt);;All Files (*.*)",
+        "file_filters": "Kotlin Files (*.kt);;All Files (*.*)",
         "file_open_error": "Failed to open file:\n{err}",
         "file_save_error": "Failed to save file:\n{err}",
         "editor_placeholder": "Enter program text…",
@@ -337,8 +351,12 @@ TRANSLATIONS = {
             "Recognized tokens: {tokens}. "
             "Errors: {errors}. Lines: {lines}, chars: {chars}."
         ),
-        "run_done_ok": "Lexical analysis completed without errors",
-        "run_done_with_errors": "Lexical analysis completed. Errors: {errors}",
+        "run_done_ok": "Analysis completed without errors",
+        "run_done_with_errors": "Analysis completed. Errors: {errors}",
+        "show_ast": "Show AST",
+        "show_ast_no_data": "AST is not available yet. Run analysis for a valid input first.",
+        "ast_output_header": "AST (text view):",
+        "ast_output_unavailable": "AST was not built because of lexical or syntax errors.",
         "analyzer_stub": "[Run] Analyzer (stub) — demo errors added.",
         "text_task_stub": "[Text] Problem statement — not implemented",
         "text_grammar_stub": "[Text] Grammar — not implemented",
@@ -379,21 +397,8 @@ TRANSLATIONS = {
         },
         "space_lexeme_label": "(space)",
         "invalid_symbol_template": "Invalid symbol '{symbol}'",
-        "search_stub": "Find…",
-        "search_mode_label": "Search type:",
-        "search_mode_passport": "Russian passport series and number",
-        "search_mode_amex": "Amex card",
-        "search_mode_name": "English full name",
-        "search_run": "Search",
-        "search_results_tab": "Search",
-        "col_search_match": "Matched substring",
-        "col_search_position": "Start position",
-        "col_search_length": "Length",
-        "search_count": "Matches found: {count}",
-        "search_no_matches": "No matches found",
-        "search_no_data": "No data to search",
-        "search_done": "Search finished. Matches: {count}",
-        "search_position_format": "line {line}, symbol {col}",
+        "ast_results_tab": "AST",
+        "ast_no_data": "AST is not available yet",
         "lang_ru": "Русский",
         "lang_en": "English",
         "toolbar_name": "Main",
@@ -737,17 +742,251 @@ class AboutDialog(QDialog):
 
 
 
+@dataclass(slots=True)
+class AstViewNode:
+    label: str
+    children: list[AstViewNode] = field(default_factory=list)
+
+
+class AstGraphicsView(QGraphicsView):
+    MIN_SCALE = 0.15
+    MAX_SCALE = 8.0
+    SCALE_STEP = 1.2
+
+    def __init__(self, scene: QGraphicsScene, parent: QWidget | None = None) -> None:
+        super().__init__(scene, parent)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setBackgroundBrush(QColor("#e5e7eb"))
+
+    def zoom_by(self, factor: float) -> None:
+        current = self.transform().m11()
+        if current <= 0:
+            self.resetTransform()
+            current = 1.0
+
+        target = current * factor
+        if target < self.MIN_SCALE:
+            factor = self.MIN_SCALE / current
+        elif target > self.MAX_SCALE:
+            factor = self.MAX_SCALE / current
+
+        self.scale(factor, factor)
+
+    def zoom_in(self) -> None:
+        self.zoom_by(self.SCALE_STEP)
+
+    def zoom_out(self) -> None:
+        self.zoom_by(1.0 / self.SCALE_STEP)
+
+    def fit_scene(self) -> None:
+        bounds = self.sceneRect()
+        if bounds.isNull() or bounds.isEmpty():
+            return
+        self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.zoom_in()
+            event.accept()
+            return
+        if delta < 0:
+            self.zoom_out()
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+
+class AstGraphDialog(QDialog):
+    NODE_WIDTH = 180
+    NODE_HEIGHT = 56
+    H_SPACING = 28
+    V_SPACING = 72
+
+    def __init__(self, root: ProgramNode, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("show_ast"))
+        self.resize(980, 700)
+
+        self.scene = QGraphicsScene(self)
+        self.view = AstGraphicsView(self.scene, self)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.view)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok, self
+        )
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
+
+        self._draw_tree(self._build_view_tree(root))
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.view.fit_scene()
+
+    def _build_expr_view(self, expr: ExprNode | None) -> AstViewNode:
+        if expr is None:
+            return AstViewNode("<EMPTY>")
+        if isinstance(expr, BinaryOpNode):
+            return AstViewNode(
+                f"OPERATOR: {expr.operator}",
+                [self._build_expr_view(expr.left), self._build_expr_view(expr.right)],
+            )
+        if isinstance(expr, IdentifierNode):
+            return AstViewNode(f"ID: {expr.name}")
+        if isinstance(expr, IntLiteralNode):
+            return AstViewNode(f"VALUE: {expr.value}")
+        return AstViewNode(expr.__class__.__name__)
+
+    def _build_decl_view(self, node: ValDeclNode) -> AstViewNode:
+        children: list[AstViewNode] = [AstViewNode(f"ID: {node.name}")]
+        lambda_children: list[AstViewNode] = []
+
+        if isinstance(node.value, LambdaNode):
+            params = node.value.params
+            lambda_children.append(
+                AstViewNode(
+                    f"PARAMETERS ({len(params)})",
+                    [
+                        AstViewNode(f"{param.name}: {param.inferred_type}")
+                        for param in params
+                    ],
+                )
+            )
+
+        if isinstance(node.function_type, FunctionTypeNode):
+            arg_types = node.function_type.param_types
+            lambda_children.append(
+                AstViewNode(
+                    f"ARG TYPES ({len(arg_types)})",
+                    [AstViewNode(type_node.name) for type_node in arg_types],
+                )
+            )
+            if node.function_type.return_type is not None:
+                lambda_children.append(
+                    AstViewNode(f"RETURNS: {node.function_type.return_type.name}")
+                )
+
+        if isinstance(node.value, LambdaNode) and node.value.body is not None:
+            lambda_children.append(
+                AstViewNode("BODY", [self._build_expr_view(node.value.body)])
+            )
+
+        if lambda_children:
+            children.append(AstViewNode("LAMBDA EXPRESSION", lambda_children))
+
+        return AstViewNode("VAL DECLARATION", children)
+
+    def _build_view_tree(self, root: ProgramNode) -> AstViewNode:
+        return AstViewNode(
+            "PROGRAM",
+            [self._build_decl_view(declaration) for declaration in root.declarations],
+        )
+
+    def _subtree_width(self, node: AstViewNode) -> int:
+        if not node.children:
+            return 1
+        return sum(self._subtree_width(child) for child in node.children)
+
+    def _layout_tree(
+        self,
+        node: AstViewNode,
+        depth: int,
+        x_offset: int,
+        widths: dict[int, int],
+        positions: dict[int, tuple[float, int, AstViewNode]],
+    ) -> None:
+        width = widths[id(node)]
+        center = x_offset + width / 2
+        positions[id(node)] = (center, depth, node)
+
+        child_offset = x_offset
+        for child in node.children:
+            self._layout_tree(child, depth + 1, child_offset, widths, positions)
+            child_offset += widths[id(child)]
+
+    def _draw_edges(
+        self,
+        node: AstViewNode,
+        positions: dict[int, tuple[float, int, AstViewNode]],
+        x_unit: int,
+        y_unit: int,
+        edge_pen: QPen,
+    ) -> None:
+        parent_x_units, parent_depth, _ = positions[id(node)]
+        parent_x = parent_x_units * x_unit
+        parent_y = parent_depth * y_unit
+
+        for child in node.children:
+            child_x_units, child_depth, _ = positions[id(child)]
+            child_x = child_x_units * x_unit
+            child_y = child_depth * y_unit
+            self.scene.addLine(
+                parent_x,
+                parent_y + self.NODE_HEIGHT,
+                child_x,
+                child_y,
+                edge_pen,
+            )
+            self._draw_edges(child, positions, x_unit, y_unit, edge_pen)
+
+    def _draw_tree(self, root: AstViewNode) -> None:
+        self.scene.clear()
+
+        widths: dict[int, int] = {}
+
+        def collect_widths(node: AstViewNode) -> int:
+            width = self._subtree_width(node)
+            widths[id(node)] = width
+            for child in node.children:
+                collect_widths(child)
+            return width
+
+        collect_widths(root)
+
+        positions: dict[int, tuple[float, int, AstViewNode]] = {}
+        self._layout_tree(root, 0, 0, widths, positions)
+
+        x_unit = self.NODE_WIDTH + self.H_SPACING
+        y_unit = self.NODE_HEIGHT + self.V_SPACING
+
+        edge_pen = QPen(QColor("#94a3b8"))
+        edge_pen.setWidth(2)
+        self._draw_edges(root, positions, x_unit, y_unit, edge_pen)
+
+        node_pen = QPen(QColor("#334155"))
+        node_pen.setWidth(2)
+        node_brush = QBrush(QColor("#f8fafc"))
+        text_font = QFont("Segoe UI", 9)
+
+        for center_x_units, depth, node in positions.values():
+            center_x = center_x_units * x_unit
+            y = depth * y_unit
+            x = center_x - self.NODE_WIDTH / 2
+
+            rect = self.scene.addRect(x, y, self.NODE_WIDTH, self.NODE_HEIGHT, node_pen)
+            rect.setBrush(node_brush)
+
+            text = self.scene.addText(node.label, text_font)
+            text.setTextWidth(self.NODE_WIDTH - 12)
+            text.setDefaultTextColor(QColor("#0f172a"))
+            text.setPos(x + 6, y + 6)
+
+        bounds = self.scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        self.scene.setSceneRect(bounds)
 
 
 class ResultTabWidget(QTabWidget):
     error_double_clicked = pyqtSignal(int, int)
-    search_double_clicked = pyqtSignal(int, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setTabsClosable(False)
 
-        # Errors table (only syntax errors)
         self.error_table = QTableWidget(0, 3, self)
         self.error_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers
@@ -762,66 +1001,42 @@ class ResultTabWidget(QTabWidget):
             self._on_error_click
         )
 
-        # Error count label
         self.error_count_label = QLabel()
         self.error_count_label.setText(tr("no_errors"))
         self.error_count_label.setStyleSheet("font-weight: bold; padding: 8px;")
         
-        # Error table container with label
         error_container = QWidget()
         error_layout = QVBoxLayout(error_container)
         error_layout.setContentsMargins(0, 0, 0, 0)
         error_layout.addWidget(self.error_table)
         error_layout.addWidget(self.error_count_label)
         
-        # Output and log widgets
         self.output_text = QPlainTextEdit(self)
         self.output_text.setReadOnly(True)
 
         self.log_text = QPlainTextEdit(self)
         self.log_text.setReadOnly(True)
 
-        # Search results table
-        self.search_table = QTableWidget(0, 3, self)
-        self.search_table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers
-        )
-        self.search_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self.search_table.verticalHeader().setVisible(False)
-        self._update_search_headers()
-        self.search_table.cellClicked.connect(self._on_search_click)
-
-        self.search_count_label = QLabel()
-        self.search_count_label.setText(tr("search_no_matches"))
-        self.search_count_label.setStyleSheet("font-weight: bold; padding: 8px;")
-
-        search_container = QWidget()
-        search_layout = QVBoxLayout(search_container)
-        search_layout.setContentsMargins(0, 0, 0, 0)
-        search_layout.addWidget(self.search_table)
-        search_layout.addWidget(self.search_count_label)
+        self.ast_text = QPlainTextEdit(self)
+        self.ast_text.setReadOnly(True)
 
         self.addTab(error_container, tr("errors_tab"))
         self.addTab(self.output_text, tr("output_tab"))
         self.addTab(self.log_text, tr("log_tab"))
-        self.addTab(search_container, tr("search_results_tab"))
+        self.addTab(self.ast_text, tr("ast_results_tab"))
 
     def retranslate(self) -> None:
         self.setTabText(0, tr("errors_tab"))
         self.setTabText(1, tr("output_tab"))
         self.setTabText(2, tr("log_tab"))
-        self.setTabText(3, tr("search_results_tab"))
+        self.setTabText(3, tr("ast_results_tab"))
         self._update_error_headers()
-        self._update_search_headers()
 
     def add_error(self, fragment: str, line: int, column: int, description: str) -> None:
         """Add an error to the errors table"""
         row = self.error_table.rowCount()
         self.error_table.insertRow(row)
 
-        # Store position data for navigation
         fragment_item = QTableWidgetItem(fragment)
         fragment_item.setData(Qt.ItemDataRole.UserRole, line)
         fragment_item.setData(Qt.ItemDataRole.UserRole + 1, column)
@@ -861,46 +1076,18 @@ class ResultTabWidget(QTabWidget):
         self.error_table.setRowCount(0)
         self.error_count_label.setText(tr("no_errors"))
 
-    def clear_search_results(self) -> None:
-        self.search_table.setRowCount(0)
-        self.search_count_label.setText(tr("search_no_matches"))
+    def clear_ast(self) -> None:
+        self.ast_text.clear()
 
-    def set_search_no_data(self) -> None:
-        self.search_table.setRowCount(0)
-        self.search_count_label.setText(tr("search_no_data"))
-
-    def set_search_results(self, matches: list[SearchMatch]) -> None:
-        self.search_table.setRowCount(0)
-        if not matches:
-            self.search_count_label.setText(tr("search_no_matches"))
-            return
-
-        for match in matches:
-            row = self.search_table.rowCount()
-            self.search_table.insertRow(row)
-
-            value_item = QTableWidgetItem(match.value)
-            value_item.setData(Qt.ItemDataRole.UserRole, match.start)
-            value_item.setData(Qt.ItemDataRole.UserRole + 1, match.length)
-            self.search_table.setItem(row, 0, value_item)
-
-            position_text = tr("search_position_format").format(
-                line=match.line,
-                col=match.column,
-            )
-            self.search_table.setItem(row, 1, QTableWidgetItem(position_text))
-            self.search_table.setItem(row, 2, QTableWidgetItem(str(match.length)))
-
-        self.search_count_label.setText(
-            tr("search_count").format(count=len(matches))
-        )
+    def set_ast_text(self, text: str) -> None:
+        self.ast_text.setPlainText(text if text else tr("ast_no_data"))
 
     def set_font_size(self, size: int) -> None:
         for widget in (
             self.output_text,
             self.log_text,
             self.error_table,
-            self.search_table,
+            self.ast_text,
         ):
             f = widget.font()
             f.setPointSize(size)
@@ -908,7 +1095,6 @@ class ResultTabWidget(QTabWidget):
         lbl_font = self.error_count_label.font()
         lbl_font.setPointSize(size)
         self.error_count_label.setFont(lbl_font)
-        self.search_count_label.setFont(lbl_font)
 
     def _update_error_headers(self) -> None:
         self.error_table.setHorizontalHeaderLabels([
@@ -921,17 +1107,6 @@ class ResultTabWidget(QTabWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
 
-    def _update_search_headers(self) -> None:
-        self.search_table.setHorizontalHeaderLabels([
-            tr("col_search_match"),
-            tr("col_search_position"),
-            tr("col_search_length"),
-        ])
-        header = self.search_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-
     def _on_error_click(self, row: int, _col: int) -> None:
         """Handle click on error table"""
         item = self.error_table.item(row, 0)
@@ -942,16 +1117,6 @@ class ResultTabWidget(QTabWidget):
         col = item.data(Qt.ItemDataRole.UserRole + 1)
         if isinstance(line, int) and isinstance(col, int):
             self.error_double_clicked.emit(line, col)
-
-    def _on_search_click(self, row: int, _col: int) -> None:
-        item = self.search_table.item(row, 0)
-        if not item:
-            return
-
-        start = item.data(Qt.ItemDataRole.UserRole)
-        length = item.data(Qt.ItemDataRole.UserRole + 1)
-        if isinstance(start, int) and isinstance(length, int):
-            self.search_double_clicked.emit(start, length)
 
 
 
@@ -971,6 +1136,31 @@ class CompilerWindow(QMainWindow):
         text = tr(key)
         return text.format(**kwargs) if kwargs else text
 
+    @staticmethod
+    def _build_ast_icon() -> QIcon:
+        pixmap = QPixmap(20, 20)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        edge_pen = QPen(QColor("#64748b"))
+        edge_pen.setWidth(2)
+        painter.setPen(edge_pen)
+        painter.drawLine(10, 4, 5, 9)
+        painter.drawLine(10, 4, 15, 9)
+        painter.drawLine(10, 4, 10, 15)
+
+        node_pen = QPen(QColor("#0f172a"))
+        node_pen.setWidth(1)
+        painter.setPen(node_pen)
+        painter.setBrush(QBrush(QColor("#e2e8f0")))
+        for x, y in ((8, 2), (3, 8), (13, 8), (8, 14)):
+            painter.drawRoundedRect(x, y, 4, 4, 1.2, 1.2)
+
+        painter.end()
+        return QIcon(pixmap)
+
 
     def __init__(self) -> None:
         super().__init__()
@@ -981,12 +1171,14 @@ class CompilerWindow(QMainWindow):
         self.lexical_analyzer = LexicalAnalyzer()
         self.antlr_syntax_analyzer = AntlrSyntaxAnalyzer()
         self.syntax_analyzer = SyntaxAnalyzer()
-        self.regex_search_service = RegexSearchService()
+        self.semantic_analyzer = SemanticAnalyzer()
         self._has_run_result = False
         self._last_run_no_code = False
         self._last_run_tokens: list[Lexeme] = []
         self._last_run_errors = 0
         self._last_run_syntax_errors: list[SyntaxError] = []
+        self._last_run_ast: ProgramNode | None = None
+        self._last_run_ast_text = ""
         self._last_run_lines = 0
         self._last_run_chars = 0
         self._output_history: list[tuple[str, str, dict]] = []
@@ -1135,6 +1327,11 @@ class CompilerWindow(QMainWindow):
         self.action_run.triggered.connect(self.on_run)
         self.action_run.setIcon(QIcon.fromTheme("media-playback-start"))
 
+        self.action_show_ast = QAction(self._build_ast_icon(), tr("show_ast"), self)
+        self.action_show_ast.setShortcut(QKeySequence("Ctrl+Shift+A"))
+        self.action_show_ast.setStatusTip(tr("show_ast"))
+        self.action_show_ast.triggered.connect(self.on_show_ast)
+
         self.action_mode_recursive = QAction(
             tr("analyzer_mode_recursive"), self
         )
@@ -1154,11 +1351,6 @@ class CompilerWindow(QMainWindow):
         self.analyzer_mode_group.addAction(self.action_mode_recursive)
         self.analyzer_mode_group.addAction(self.action_mode_antlr)
         self._sync_analyzer_actions()
-
-
-        self.action_find = QAction(tr("search_run"), self)
-        self.action_find.setShortcut(QKeySequence("Ctrl+F"))
-        self.action_find.triggered.connect(self.on_regex_search)
 
 
         self.action_help = QAction(
@@ -1218,8 +1410,6 @@ class CompilerWindow(QMainWindow):
         self.edit_menu.addAction(self.action_zoom_in)
         self.edit_menu.addAction(self.action_zoom_out)
         self.edit_menu.addAction(self.action_zoom_reset)
-        self.edit_menu.addSeparator()
-        self.edit_menu.addAction(self.action_find)
 
 
         self.text_menu = menu_bar.addMenu(tr("text"))
@@ -1235,6 +1425,7 @@ class CompilerWindow(QMainWindow):
 
         self.run_menu = menu_bar.addMenu(tr("run_menu"))
         self.run_menu.addAction(self.action_run)
+        self.run_menu.addAction(self.action_show_ast)
         self.run_menu.addSeparator()
         self.analyzer_menu = self.run_menu.addMenu(tr("analyzer_mode_menu"))
         self.analyzer_menu.addAction(self.action_mode_recursive)
@@ -1278,6 +1469,7 @@ class CompilerWindow(QMainWindow):
         toolbar.addAction(self.action_paste)
         toolbar.addSeparator()
         toolbar.addAction(self.action_run)
+        toolbar.addAction(self.action_show_ast)
         toolbar.addSeparator()
 
 
@@ -1307,24 +1499,6 @@ class CompilerWindow(QMainWindow):
             self._on_analyzer_mode_combo_changed
         )
         toolbar.addWidget(self.analyzer_mode_combo)
-
-        toolbar.addSeparator()
-        toolbar.addWidget(QLabel(" " + tr("search_mode_label") + " "))
-        self.search_mode_combo = QComboBox(self)
-        self.search_mode_combo.addItem(
-            tr("search_mode_passport"),
-            RegexSearchMode.RUSSIAN_PASSPORT,
-        )
-        self.search_mode_combo.addItem(
-            tr("search_mode_amex"),
-            RegexSearchMode.AMEX_CARD,
-        )
-        self.search_mode_combo.addItem(
-            tr("search_mode_name"),
-            RegexSearchMode.ENGLISH_NAME,
-        )
-        toolbar.addWidget(self.search_mode_combo)
-        toolbar.addAction(self.action_find)
 
         toolbar.addSeparator()
         toolbar.addAction(self.action_help)
@@ -1368,7 +1542,6 @@ class CompilerWindow(QMainWindow):
 
         self.result_tabs = ResultTabWidget(self)
         self.result_tabs.error_double_clicked.connect(self._on_error_go_to)
-        self.result_tabs.search_double_clicked.connect(self._on_search_go_to)
 
 
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -1636,14 +1809,13 @@ class CompilerWindow(QMainWindow):
         self.result_tabs.clear_errors()
         self.result_tabs.output_text.clear()
         self.result_tabs.log_text.clear()
+        self.result_tabs.clear_ast()
         self._output_history.clear()
         self._log_history.clear()
 
-        # Add syntax errors to errors table
         for error in self._last_run_syntax_errors:
             self.result_tabs.add_syntax_error(error)
         
-        # Update errors panel summary message.
         total_errors = len(self._last_run_syntax_errors)
         if self._last_run_no_code:
             self.result_tabs.set_no_code_message()
@@ -1658,6 +1830,13 @@ class CompilerWindow(QMainWindow):
             chars=self._last_run_chars,
         )
 
+        if self._last_run_ast_text:
+            self.result_tabs.set_ast_text(self._last_run_ast_text)
+        elif not self._last_run_no_code:
+            self.result_tabs.set_ast_text(tr("ast_output_unavailable"))
+        else:
+            self.result_tabs.set_ast_text(tr("ast_no_data"))
+
         if self._last_run_errors:
             completion_key = "run_done_with_errors"
             completion_kwargs = {"errors": self._last_run_errors}
@@ -1671,7 +1850,7 @@ class CompilerWindow(QMainWindow):
         if update_status:
             self.statusBar().showMessage(completion)
         if focus_results:
-            self.result_tabs.setCurrentIndex(0)
+            self.result_tabs.setCurrentIndex(3)
 
 
     def on_file_new(self) -> None:
@@ -1712,7 +1891,7 @@ class CompilerWindow(QMainWindow):
         if not td:
             return
         if td.file_path:
-            self._save_tab_to_file(td, td.file_path)
+            self._save_tab_to_file(td, self._normalize_save_path(td.file_path))
         else:
             self.on_file_save_as()
 
@@ -1724,7 +1903,15 @@ class CompilerWindow(QMainWindow):
             self, tr("save_as_title"), "", tr("file_filters")
         )
         if path:
-            self._save_tab_to_file(td, path)
+            self._save_tab_to_file(td, self._normalize_save_path(path))
+
+    def _normalize_save_path(self, path: str) -> str:
+        base, ext = os.path.splitext(path)
+        if ext.lower() == ".kt":
+            return path
+        if ext:
+            return f"{base}.kt"
+        return f"{path}.kt"
 
     def _save_tab_to_file(self, td: TabData, path: str) -> None:
         try:
@@ -1826,6 +2013,18 @@ class CompilerWindow(QMainWindow):
     def on_text_source_code(self) -> None:
         self.log_debug_tr("text_source_code_stub")
 
+    def _lexical_error_to_syntax_error(self, token: Lexeme) -> SyntaxError:
+        return SyntaxError(
+            code=-1,
+            error_type="лексическая ошибка",
+            unexpected_lexeme=token.lexeme,
+            expected="",
+            line=token.line,
+            column_start=token.column_start,
+            column_end=token.column_end,
+            message=token.error_message or token_type_label(-1, True),
+        )
+
 
 
 
@@ -1842,30 +2041,56 @@ class CompilerWindow(QMainWindow):
             self._has_run_result = False
             self._last_run_tokens = []
             self._last_run_syntax_errors = []
+            self._last_run_ast = None
+            self._last_run_ast_text = ""
             self._last_run_errors = 0
             self._last_run_lines = 0
             self._last_run_chars = 0
+            self.result_tabs.clear_ast()
             self.log_tr("run_no_active_editor")
             return
 
         text = editor.toPlainText()
         self._last_run_no_code = not text.strip()
-        # Lexical analysis
         self._last_run_tokens = self.lexical_analyzer.analyze(text)
-        
-        # Syntax analysis using the explicitly selected mode.
+
+        lexical_errors: list[SyntaxError] = []
+        if self._analyzer_mode == "recursive":
+            lexical_errors = [
+                self._lexical_error_to_syntax_error(token)
+                for token in self._last_run_tokens
+                if token.is_error
+            ]
+
         if self._analyzer_mode == "antlr":
             parse_result = self.antlr_syntax_analyzer.analyze_text(text)
         else:
             parse_result = self.syntax_analyzer.analyze(self._last_run_tokens)
-        self._last_run_syntax_errors = parse_result.errors
-        
+
+        all_errors = lexical_errors + parse_result.errors
+        self._last_run_ast = None
+        self._last_run_ast_text = ""
+
+        if not all_errors and not self._last_run_no_code:
+            semantic_result = self.semantic_analyzer.analyze(self._last_run_tokens)
+            self._last_run_ast = semantic_result.ast
+            self._last_run_ast_text = format_ast_tree(semantic_result.ast)
+            all_errors.extend(semantic_result.errors)
+
+        self._last_run_syntax_errors = all_errors
         self._last_run_errors = len(self._last_run_syntax_errors)
         self._last_run_lines = editor.blockCount()
         self._last_run_chars = len(text)
         self._has_run_result = True
 
         self._render_run_results(update_status=True, focus_results=True)
+
+    def on_show_ast(self) -> None:
+        if self._last_run_ast is None:
+            QMessageBox.information(self, tr("show_ast"), tr("show_ast_no_data"))
+            return
+
+        AstGraphDialog(self._last_run_ast, self).exec()
 
     def _on_error_go_to(self, line: int, col: int) -> None:
         editor = self._current_editor()
@@ -1879,73 +2104,6 @@ class CompilerWindow(QMainWindow):
             editor.setTextCursor(cursor)
             editor.centerCursor()
             editor.setFocus()
-
-    def _highlight_range(self, start: int, length: int) -> None:
-        editor = self._current_editor()
-        if not editor:
-            return
-
-        cursor = editor.textCursor()
-        cursor.setPosition(start)
-        cursor.setPosition(start + length, QTextCursor.MoveMode.KeepAnchor)
-        editor.setTextCursor(cursor)
-        editor.centerCursor()
-
-        selection = QTextEdit.ExtraSelection()
-        selection.cursor = cursor
-        selection.format.setBackground(QColor("#ffef99"))
-        selection.format.setProperty(
-            QTextFormat.Property.FullWidthSelection,
-            False,
-        )
-        editor.setExtraSelections([selection])
-        editor.setFocus()
-
-    def _clear_highlight(self) -> None:
-        editor = self._current_editor()
-        if editor:
-            editor.setExtraSelections([])
-
-    def _on_search_go_to(self, start: int, length: int) -> None:
-        self._highlight_range(start, length)
-
-
-
-
-
-    def on_regex_search(self) -> None:
-        editor = self._current_editor()
-        self.result_tabs.clear_search_results()
-        self._clear_highlight()
-
-        if not editor:
-            self.statusBar().showMessage(tr("run_no_active_editor"))
-            self.result_tabs.setCurrentIndex(3)
-            return
-
-        text = editor.toPlainText()
-        if not text.strip():
-            self.result_tabs.set_search_no_data()
-            self.result_tabs.setCurrentIndex(3)
-            self.statusBar().showMessage(tr("search_no_data"))
-            return
-
-        mode_data = self.search_mode_combo.currentData()
-        mode = (
-            mode_data
-            if isinstance(mode_data, RegexSearchMode)
-            else RegexSearchMode.AMEX_CARD
-        )
-        matches = self.regex_search_service.find(text, mode)
-        self.result_tabs.set_search_results(matches)
-        self.result_tabs.setCurrentIndex(3)
-        self.statusBar().showMessage(
-            tr("search_done").format(count=len(matches))
-        )
-
-
-
-
 
     def on_help(self) -> None:
         HelpDialog(self).exec()
@@ -2015,9 +2173,9 @@ class CompilerWindow(QMainWindow):
             "action_references": "references",
             "action_source_code": "source_code",
             "action_run": "run",
+            "action_show_ast": "show_ast",
             "action_mode_recursive": "analyzer_mode_recursive",
             "action_mode_antlr": "analyzer_mode_antlr",
-            "action_find": "search_run",
             "action_help": "help",
             "action_about": "about",
             "action_lang_ru": "lang_ru",

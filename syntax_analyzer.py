@@ -96,7 +96,6 @@ class SyntaxAnalyzer:
 
         self._parse_start()
 
-        # Report every real trailing token as a separate error.
         while self.current_pos < len(self.lexemes):
             self._error("Неожиданные токены в конце выражения", "конец выражения")
             self._advance()
@@ -131,7 +130,6 @@ class SyntaxAnalyzer:
         candidate = (text or "").strip().lower()
         target = "val"
 
-        # Fast path for very common keyboard transposition: vla.
         if candidate == "vla":
             return True
 
@@ -219,19 +217,14 @@ class SyntaxAnalyzer:
         self.result.recovered_errors += 1
 
     def _parse_start(self) -> None:
-        # <START> -> 'val' <IDENTIFIER> ':' <ARG_LIST> '->' <TYPE> '=' '{' ... '}' ';'
         if self._peek_code() != TokenType.KEYWORD_VAL.value:
             if self._peek_code() == TokenType.IDENTIFIER.value:
                 self._error("Ожидалось 'val'", "'val'")
-                # If token looks like a typo of 'val' (e.g. "vala"), consume it.
-                # Otherwise keep it as function identifier to avoid a false
-                # secondary error "Ожидалось имя функции".
                 current = self._current_lexeme()
                 text = current.lexeme if current is not None else ""
                 if self._looks_like_val_typo(text):
                     self._advance()
             else:
-                # Count each unexpected leading symbol as a separate real error.
                 while (
                     self._current_lexeme() is not None
                     and self._peek_code() != TokenType.KEYWORD_VAL.value
@@ -249,8 +242,6 @@ class SyntaxAnalyzer:
 
         identifier_ok = self._parse_identifier()
         if not identifier_ok:
-            # Recover from a bad/missing function name without immediately
-            # emitting a cascade ':' error on the same malformed token.
             while (
                 self._current_lexeme() is not None
                 and self._peek_code() not in {TokenType.COLON.value, TokenType.LPAREN.value}
@@ -317,7 +308,6 @@ class SyntaxAnalyzer:
     def _parse_return_type(self) -> None:
         if self._peek_code() != TokenType.ARROW.value:
             self._error("Ожидалась '->'", "'->'")
-            # If user wrote '-' instead of '->', consume only '-' and continue.
             if self._peek_code() == TokenType.MINUS.value and self._peek_next_code() != TokenType.ARROW.value:
                 self._advance()
             self._synchronize(self.TYPE_CODES | {TokenType.ASSIGN.value})
@@ -356,8 +346,6 @@ class SyntaxAnalyzer:
             if self._peek_code() == TokenType.LBRACE.value:
                 self._advance()
             else:
-                # Consume closing markers to avoid cascade of trailing token errors
-                # after a single missing opening brace.
                 if self._peek_code() == TokenType.RBRACE.value:
                     self._advance()
                 if self._peek_code() == TokenType.SEMICOLON.value:
@@ -463,8 +451,6 @@ class SyntaxAnalyzer:
             return
 
         self._error("Ожидалось число, идентификатор или '('", "выражение")
-        # Keep structural closers for outer rules to avoid cascades like
-        # missing ')' -> missing '}' on the same malformed tail.
         if code in {TokenType.RPAREN.value, TokenType.RBRACE.value, TokenType.SEMICOLON.value}:
             return
         if self._current_lexeme() is not None:
