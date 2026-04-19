@@ -547,151 +547,107 @@ class SemanticAnalyzer:
         return False
 
 
-def ast_node_name(node: AstNode) -> str:
-    if isinstance(node, ProgramNode):
-        return "ProgramNode"
-    if isinstance(node, ValDeclNode):
-        return "ValDeclNode"
-    if isinstance(node, FunctionTypeNode):
-        return "FunctionTypeNode"
-    if isinstance(node, TypeNode):
-        return "TypeNode"
-    if isinstance(node, LambdaNode):
-        return "LambdaNode"
-    if isinstance(node, ParamNode):
-        return "ParamNode"
-    if isinstance(node, BinaryOpNode):
-        return "BinaryOpNode"
-    if isinstance(node, IdentifierNode):
-        return "IdentifierNode"
-    if isinstance(node, IntLiteralNode):
-        return "IntLiteralNode"
-    return node.__class__.__name__
-
-
-def ast_graph_label(node: AstNode) -> str:
-    if isinstance(node, ProgramNode):
-        return "ProgramNode"
-    if isinstance(node, ValDeclNode):
-        modifiers = ", ".join(node.modifiers)
-        return f"ValDeclNode\\nname={node.name}\\nmodifiers={modifiers}"
-    if isinstance(node, FunctionTypeNode):
-        return "FunctionTypeNode"
-    if isinstance(node, TypeNode):
-        return f"TypeNode\\nname={node.name}"
-    if isinstance(node, LambdaNode):
-        return "LambdaNode"
-    if isinstance(node, ParamNode):
-        return f"ParamNode\\nname={node.name}\\ntype={node.inferred_type}"
-    if isinstance(node, BinaryOpNode):
-        return f"BinaryOpNode\\nop={node.operator}\\ntype={node.inferred_type}"
-    if isinstance(node, IdentifierNode):
-        return f"IdentifierNode\\nname={node.name}\\ntype={node.inferred_type}"
-    if isinstance(node, IntLiteralNode):
-        return f"IntLiteralNode\\nvalue={node.value}"
-    return ast_node_name(node)
-
-
-def ast_child_nodes(node: AstNode) -> list[AstNode]:
-    if isinstance(node, ProgramNode):
-        return list(node.declarations)
-    if isinstance(node, ValDeclNode):
-        children: list[AstNode] = []
-        if node.function_type is not None:
-            children.append(node.function_type)
-        if node.value is not None:
-            children.append(node.value)
-        return children
-    if isinstance(node, FunctionTypeNode):
-        children = list(node.param_types)
-        if node.return_type is not None:
-            children.append(node.return_type)
-        return children
-    if isinstance(node, LambdaNode):
-        children = list(node.params)
-        if node.body is not None:
-            children.append(node.body)
-        return children
-    if isinstance(node, BinaryOpNode):
-        return [node.left, node.right]
-    return []
-
-
-def _tree_entries(node: AstNode) -> list[tuple[Optional[str], str | AstNode]]:
-    if isinstance(node, ProgramNode):
-        return [(None, decl) for decl in node.declarations]
-
-    if isinstance(node, ValDeclNode):
-        entries: list[tuple[Optional[str], str | AstNode]] = [
-            (None, f'name: "{node.name}"'),
-            (None, f"modifiers: {node.modifiers}"),
-        ]
-        if node.function_type is not None:
-            entries.append(("type", node.function_type))
-        if node.value is not None:
-            entries.append(("value", node.value))
-        return entries
-
-    if isinstance(node, FunctionTypeNode):
-        entries: list[tuple[Optional[str], str | AstNode]] = []
-        if node.param_types:
-            entries.append((None, "params"))
-            for type_node in node.param_types:
-                entries.append((None, type_node))
-        if node.return_type is not None:
-            entries.append(("returnType", node.return_type))
-        return entries
-
-    if isinstance(node, TypeNode):
-        return [(None, f'name: "{node.name}"')]
-
-    if isinstance(node, LambdaNode):
-        entries: list[tuple[Optional[str], str | AstNode]] = []
-        if node.params:
-            entries.append((None, "params"))
-            for param in node.params:
-                entries.append((None, param))
-        if node.body is not None:
-            entries.append(("body", node.body))
-        return entries
-
-    if isinstance(node, ParamNode):
-        return [
-            (None, f'name: "{node.name}"'),
-            (None, f'type: "{node.inferred_type}"'),
-        ]
-
-    if isinstance(node, BinaryOpNode):
-        return [
-            (None, f'operator: "{node.operator}"'),
-            (None, f'type: "{node.inferred_type}"'),
-            ("left", node.left),
-            ("right", node.right),
-        ]
-
-    if isinstance(node, IdentifierNode):
-        return [
-            (None, f'name: "{node.name}"'),
-            (None, f'type: "{node.inferred_type}"'),
-        ]
-
-    if isinstance(node, IntLiteralNode):
-        return [
-            (None, f"value: {node.value}"),
-            (None, f'type: "{node.inferred_type}"'),
-        ]
-
-    return []
-
-
 def format_ast_tree(root: ProgramNode | None) -> str:
     if root is None:
         return "<AST is empty>"
 
-    lines = [ast_node_name(root)]
+    def node_label(node: AstNode) -> str:
+        if isinstance(node, ProgramNode):
+            return "PROGRAM"
+        if isinstance(node, ValDeclNode):
+            return "VAL DECLARATION"
+        if isinstance(node, LambdaNode):
+            return "LAMBDA EXPRESSION"
+        if isinstance(node, FunctionTypeNode):
+            return "FUNCTION TYPE"
+        if isinstance(node, TypeNode):
+            return node.name
+        if isinstance(node, ParamNode):
+            return f"{node.name}: {node.inferred_type}"
+        if isinstance(node, BinaryOpNode):
+            return f"OPERATOR: {node.operator}"
+        if isinstance(node, IdentifierNode):
+            return f"ID: {node.name}"
+        if isinstance(node, IntLiteralNode):
+            return f"VALUE: {node.value}"
+        return node.__class__.__name__
+
+    def children_for(node: AstNode) -> list[tuple[str | None, AstNode | str]]:
+        if isinstance(node, ProgramNode):
+            return [(None, decl) for decl in node.declarations]
+
+        if isinstance(node, ValDeclNode):
+            entries: list[tuple[str | None, AstNode | str]] = [
+                (None, f"ID: {node.name}"),
+            ]
+            if node.value is not None:
+                if node.value.params:
+                    entries.append(
+                        (
+                            None,
+                            AstNodeList(
+                                f"PARAMETERS ({len(node.value.params)})",
+                                [f"{param.name}: {param.inferred_type}" for param in node.value.params],
+                            ),
+                        )
+                    )
+                if node.function_type is not None and node.function_type.param_types:
+                    entries.append(
+                        (
+                            None,
+                            AstNodeList(
+                                f"ARG TYPES ({len(node.function_type.param_types)})",
+                                [type_node.name for type_node in node.function_type.param_types],
+                            ),
+                        )
+                    )
+                if node.function_type is not None and node.function_type.return_type is not None:
+                    entries.append((None, f"RETURNS: {node.function_type.return_type.name}"))
+                if node.value.body is not None:
+                    entries.append((None, AstNodeList("BODY", [node.value.body])))
+            return entries
+
+        if isinstance(node, LambdaNode):
+            entries: list[tuple[str | None, AstNode | str]] = []
+            if node.params:
+                entries.append((None, AstNodeList(f"PARAMETERS ({len(node.params)})", list(node.params))))
+            if node.body is not None:
+                entries.append((None, AstNodeList("BODY", [node.body])))
+            return entries
+
+        if isinstance(node, BinaryOpNode):
+            return [(None, node.left), (None, node.right)]
+
+        return []
+
+    @dataclass(slots=True)
+    class AstNodeList:
+        label: str
+        values: list[AstNode | str]
+
+    lines = [node_label(root)]
+
+    def render(node: AstNode | str | AstNodeList, prefix: str) -> None:
+        if isinstance(node, str):
+            lines.append(f"{prefix}{node}")
+            return
+
+        if isinstance(node, AstNodeList):
+            lines.append(f"{prefix}{node.label}")
+            child_prefix = prefix + "    "
+            for idx, value in enumerate(node.values):
+                branch = "└──" if idx == len(node.values) - 1 else "├──"
+                if isinstance(value, str):
+                    lines.append(f"{child_prefix}{branch} {value}")
+                else:
+                    lines.append(f"{child_prefix}{branch} {node_label(value)}")
+                    render_children(value, child_prefix + ("    " if idx == len(node.values) - 1 else "│   "))
+            return
+
+        render_children(node, prefix)
 
     def render_children(node: AstNode, prefix: str) -> None:
-        entries = _tree_entries(node)
+        entries = children_for(node)
         for idx, (label, value) in enumerate(entries):
             is_last = idx == len(entries) - 1
             branch = "└──" if is_last else "├──"
@@ -701,8 +657,19 @@ def format_ast_tree(root: ProgramNode | None) -> str:
                 lines.append(f"{prefix}{branch} {text}")
                 continue
 
-            head = ast_node_name(value)
-            text = f"{label}: {head}" if label else head
+            if isinstance(value, AstNodeList):
+                lines.append(f"{prefix}{branch} {value.label}")
+                child_prefix = prefix + ("    " if is_last else "│   ")
+                for jdx, child_value in enumerate(value.values):
+                    child_branch = "└──" if jdx == len(value.values) - 1 else "├──"
+                    if isinstance(child_value, str):
+                        lines.append(f"{child_prefix}{child_branch} {child_value}")
+                    else:
+                        lines.append(f"{child_prefix}{child_branch} {node_label(child_value)}")
+                        render_children(child_value, child_prefix + ("    " if jdx == len(value.values) - 1 else "│   "))
+                continue
+
+            text = f"{label}: {node_label(value)}" if label else node_label(value)
             lines.append(f"{prefix}{branch} {text}")
             child_prefix = prefix + ("    " if is_last else "│   ")
             render_children(value, child_prefix)
