@@ -125,7 +125,7 @@ TRANSLATIONS = {
         ),
         "open_file_title": "Открыть файл",
         "save_as_title": "Сохранить как",
-        "file_filters": "Текстовые файлы (*.txt);;Все файлы (*.*)",
+        "file_filters": "Файлы Kotlin (*.kt);;Все файлы (*.*)",
         "file_open_error": "Не удалось открыть файл:\n{err}",
         "file_save_error": "Не удалось сохранить файл:\n{err}",
         "editor_placeholder": "Введите текст программы…",
@@ -317,7 +317,7 @@ TRANSLATIONS = {
         ),
         "open_file_title": "Open File",
         "save_as_title": "Save As",
-        "file_filters": "Text Files (*.txt);;All Files (*.*)",
+        "file_filters": "Kotlin Files (*.kt);;All Files (*.*)",
         "file_open_error": "Failed to open file:\n{err}",
         "file_save_error": "Failed to save file:\n{err}",
         "editor_placeholder": "Enter program text…",
@@ -2028,7 +2028,7 @@ class CompilerWindow(QMainWindow):
         if not td:
             return
         if td.file_path:
-            self._save_tab_to_file(td, td.file_path)
+            self._save_tab_to_file(td, self._normalize_save_path(td.file_path))
         else:
             self.on_file_save_as()
 
@@ -2040,7 +2040,15 @@ class CompilerWindow(QMainWindow):
             self, tr("save_as_title"), "", tr("file_filters")
         )
         if path:
-            self._save_tab_to_file(td, path)
+            self._save_tab_to_file(td, self._normalize_save_path(path))
+
+    def _normalize_save_path(self, path: str) -> str:
+        base, ext = os.path.splitext(path)
+        if ext.lower() == ".kt":
+            return path
+        if ext:
+            return f"{base}.kt"
+        return f"{path}.kt"
 
     def _save_tab_to_file(self, td: TabData, path: str) -> None:
         try:
