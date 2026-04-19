@@ -1,9 +1,22 @@
+from __future__ import annotations
+
 import os
 import sys
+from dataclasses import dataclass, field
 
 from lexical_analyzer import Lexeme, LexicalAnalyzer
 from antlr_syntax_analyzer import AntlrSyntaxAnalyzer
 from syntax_analyzer import SyntaxAnalyzer, SyntaxError
+from semantic_analyzer import (
+    BinaryOpNode,
+    ExprNode,
+    IdentifierNode,
+    IntLiteralNode,
+    ProgramNode,
+    SemanticAnalyzer,
+    ValDeclNode,
+    format_ast_tree,
+)
 from regex_search import RegexSearchMode, RegexSearchService, SearchMatch
 
 from PyQt6.QtCore import (
@@ -17,6 +30,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QAction,
     QActionGroup,
+    QBrush,
     QColor,
     QDragEnterEvent,
     QDropEvent,
@@ -27,7 +41,11 @@ from PyQt6.QtGui import (
     QSyntaxHighlighter,
     QTextCharFormat,
     QTextCursor,
-    QTextFormat, QIcon,
+    QTextFormat,
+    QIcon,
+    QPen,
+    QPixmap,
+    QWheelEvent,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -35,6 +53,8 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QGraphicsScene,
+    QGraphicsView,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -149,8 +169,12 @@ TRANSLATIONS = {
             "Распознано лексем: {tokens}. "
             "Ошибок: {errors}. Строк: {lines}, символов: {chars}."
         ),
-        "run_done_ok": "Лексический анализ завершен без ошибок",
-        "run_done_with_errors": "Лексический анализ завершен. Ошибок: {errors}",
+        "run_done_ok": "Анализ завершен без ошибок",
+        "run_done_with_errors": "Анализ завершен. Ошибок: {errors}",
+        "show_ast": "Показать AST",
+        "show_ast_no_data": "AST пока недоступно. Выполните анализ корректной строки.",
+        "ast_output_header": "AST (текстовое представление):",
+        "ast_output_unavailable": "AST не построено из-за ошибок синтаксиса или лексики.",
         "analyzer_stub": (
             "[Пуск] Анализатор (заглушка) — демонстрационные ошибки добавлены."
         ),
@@ -337,8 +361,12 @@ TRANSLATIONS = {
             "Recognized tokens: {tokens}. "
             "Errors: {errors}. Lines: {lines}, chars: {chars}."
         ),
-        "run_done_ok": "Lexical analysis completed without errors",
-        "run_done_with_errors": "Lexical analysis completed. Errors: {errors}",
+        "run_done_ok": "Analysis completed without errors",
+        "run_done_with_errors": "Analysis completed. Errors: {errors}",
+        "show_ast": "Show AST",
+        "show_ast_no_data": "AST is not available yet. Run analysis for a valid input first.",
+        "ast_output_header": "AST (text view):",
+        "ast_output_unavailable": "AST was not built because of lexical or syntax errors.",
         "analyzer_stub": "[Run] Analyzer (stub) — demo errors added.",
         "text_task_stub": "[Text] Problem statement — not implemented",
         "text_grammar_stub": "[Text] Grammar — not implemented",
@@ -739,6 +767,259 @@ class AboutDialog(QDialog):
 
 
 
+class AstGraphicsView(QGraphicsView):
+    MIN_SCALE = 0.15
+    MAX_SCALE = 8.0
+    SCALE_STEP = 1.2
+
+    def __init__(self, scene: QGraphicsScene, parent: QWidget | None = None) -> None:
+        super().__init__(scene, parent)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setBackgroundBrush(QColor("#e5e7eb"))
+
+    def zoom_by(self, factor: float) -> None:
+        current = self.transform().m11()
+        if current <= 0:
+            self.resetTransform()
+            current = 1.0
+
+        target = current * factor
+        if target < self.MIN_SCALE:
+            factor = self.MIN_SCALE / current
+        elif target > self.MAX_SCALE:
+            factor = self.MAX_SCALE / current
+
+        self.scale(factor, factor)
+
+    def zoom_in(self) -> None:
+        self.zoom_by(self.SCALE_STEP)
+
+    def zoom_out(self) -> None:
+        self.zoom_by(1.0 / self.SCALE_STEP)
+
+    def fit_scene(self) -> None:
+        bounds = self.sceneRect()
+        if bounds.isNull() or bounds.isEmpty():
+            return
+
+        self.resetTransform()
+        self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if event.angleDelta().y() > 0:
+            self.zoom_in()
+        elif event.angleDelta().y() < 0:
+            self.zoom_out()
+        event.accept()
+
+
+@dataclass(slots=True)
+class AstViewNode:
+    label: str
+    children: list[AstViewNode] = field(default_factory=list)
+
+
+class AstGraphDialog(QDialog):
+    NODE_WIDTH = 220
+    NODE_HEIGHT = 76
+    H_GAP = 42
+    V_GAP = 96
+
+    def __init__(self, root: ProgramNode, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("show_ast"))
+        self.resize(1100, 760)
+        self._fitted_once = False
+
+        layout = QVBoxLayout(self)
+        self.scene = QGraphicsScene(self)
+        self.view = AstGraphicsView(self.scene, self)
+        self.view.setRenderHints(
+            QPainter.RenderHint.Antialiasing
+            | QPainter.RenderHint.TextAntialiasing
+        )
+        layout.addWidget(self.view)
+
+        self._draw_tree(root)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._fitted_once:
+            self.view.fit_scene()
+            self._fitted_once = True
+
+    def keyPressEvent(self, event) -> None:
+        if event.matches(QKeySequence.StandardKey.ZoomIn):
+            self.view.zoom_in()
+            event.accept()
+            return
+
+        if event.matches(QKeySequence.StandardKey.ZoomOut):
+            self.view.zoom_out()
+            event.accept()
+            return
+
+        if event.key() == Qt.Key.Key_0:
+            self.view.fit_scene()
+            event.accept()
+            return
+
+        super().keyPressEvent(event)
+
+    def _declaration_label(self, node: ValDeclNode) -> str:
+        if node.modifiers:
+            return f"{' '.join(node.modifiers).upper()} DECLARATION"
+        return "DECLARATION"
+
+    def _build_expr_view(self, expr: ExprNode | None) -> AstViewNode:
+        if expr is None:
+            return AstViewNode("<EMPTY>")
+
+        if isinstance(expr, BinaryOpNode):
+            return AstViewNode(
+                f"OPERATOR: {expr.operator}",
+                [
+                    self._build_expr_view(expr.left),
+                    self._build_expr_view(expr.right),
+                ],
+            )
+
+        if isinstance(expr, IdentifierNode):
+            return AstViewNode(expr.name)
+
+        if isinstance(expr, IntLiteralNode):
+            return AstViewNode(str(expr.value))
+
+        return AstViewNode(expr.__class__.__name__)
+
+    def _build_decl_view(self, node: ValDeclNode) -> AstViewNode:
+        children: list[AstViewNode] = [AstViewNode(f"ID: {node.name}")]
+
+        lambda_children: list[AstViewNode] = []
+
+        if node.value is not None:
+            params = [
+                AstViewNode(f"{param.name} : {param.inferred_type}")
+                for param in node.value.params
+            ]
+            lambda_children.append(AstViewNode(f"PARAMS ({len(params)})", params))
+
+        if node.function_type is not None:
+            arg_children = [
+                AstViewNode(type_node.name)
+                for type_node in node.function_type.param_types
+            ]
+            lambda_children.append(AstViewNode(f"ARG TYPES ({len(arg_children)})", arg_children))
+
+            if node.function_type.return_type is not None:
+                lambda_children.append(
+                    AstViewNode(f"RETURNS: {node.function_type.return_type.name}")
+                )
+
+        if node.value is not None:
+            lambda_children.append(
+                AstViewNode("BODY", [self._build_expr_view(node.value.body)])
+            )
+
+        if lambda_children:
+            children.append(AstViewNode("LAMBDA FUNCTION", lambda_children))
+
+        return AstViewNode(self._declaration_label(node), children)
+
+    def _build_view_tree(self, root: ProgramNode) -> AstViewNode:
+        if len(root.declarations) == 1:
+            return self._build_decl_view(root.declarations[0])
+
+        return AstViewNode(
+            "PROGRAM",
+            [self._build_decl_view(decl) for decl in root.declarations],
+        )
+
+    def _layout_tree(
+        self,
+        node: AstViewNode,
+        depth: int,
+        left_units: float,
+        positions: dict[int, tuple[float, int, AstViewNode]],
+        edges: list[tuple[int, int]],
+    ) -> float:
+        if not node.children:
+            positions[id(node)] = (left_units + 0.5, depth, node)
+            return 1.0
+
+        cursor = left_units
+        total_width = 0.0
+        for child in node.children:
+            child_width = self._layout_tree(child, depth + 1, cursor, positions, edges)
+            cursor += child_width
+            total_width += child_width
+            edges.append((id(node), id(child)))
+
+        positions[id(node)] = (left_units + total_width / 2.0, depth, node)
+        return max(total_width, 1.0)
+
+    def _draw_tree(self, root: ProgramNode) -> None:
+        view_root = self._build_view_tree(root)
+
+        positions: dict[int, tuple[float, int, AstViewNode]] = {}
+        edges: list[tuple[int, int]] = []
+        self._layout_tree(
+            view_root,
+            depth=0,
+            left_units=0.0,
+            positions=positions,
+            edges=edges,
+        )
+
+        x_unit = self.NODE_WIDTH + self.H_GAP
+        y_unit = self.NODE_HEIGHT + self.V_GAP
+
+        edge_pen = QPen(QColor("#94a3b8"))
+        edge_pen.setWidth(2)
+
+        for parent_id, child_id in edges:
+            parent = positions.get(parent_id)
+            child = positions.get(child_id)
+            if parent is None or child is None:
+                continue
+
+            parent_x = parent[0] * x_unit
+            parent_y = parent[1] * y_unit
+            child_x = child[0] * x_unit
+            child_y = child[1] * y_unit
+
+            self.scene.addLine(
+                parent_x,
+                parent_y + self.NODE_HEIGHT,
+                child_x,
+                child_y,
+                edge_pen,
+            )
+
+        node_pen = QPen(QColor("#334155"))
+        node_pen.setWidth(2)
+        node_brush = QBrush(QColor("#f8fafc"))
+        text_font = QFont("Segoe UI", 9)
+
+        for center_x_units, depth, node in positions.values():
+            center_x = center_x_units * x_unit
+            y = depth * y_unit
+            x = center_x - self.NODE_WIDTH / 2
+
+            rect = self.scene.addRect(x, y, self.NODE_WIDTH, self.NODE_HEIGHT, node_pen)
+            rect.setBrush(node_brush)
+
+            text = self.scene.addText(node.label, text_font)
+            text.setTextWidth(self.NODE_WIDTH - 12)
+            text.setDefaultTextColor(QColor("#0f172a"))
+            text.setPos(x + 6, y + 6)
+
+        bounds = self.scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
+        self.scene.setSceneRect(bounds)
+
+
 class ResultTabWidget(QTabWidget):
     error_double_clicked = pyqtSignal(int, int)
     search_double_clicked = pyqtSignal(int, int)
@@ -965,6 +1246,31 @@ class CompilerWindow(QMainWindow):
         text = tr(key)
         return text.format(**kwargs) if kwargs else text
 
+    @staticmethod
+    def _build_ast_icon() -> QIcon:
+        pixmap = QPixmap(20, 20)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        edge_pen = QPen(QColor("#64748b"))
+        edge_pen.setWidth(2)
+        painter.setPen(edge_pen)
+        painter.drawLine(10, 4, 5, 9)
+        painter.drawLine(10, 4, 15, 9)
+        painter.drawLine(10, 4, 10, 15)
+
+        node_pen = QPen(QColor("#0f172a"))
+        node_pen.setWidth(1)
+        painter.setPen(node_pen)
+        painter.setBrush(QBrush(QColor("#e2e8f0")))
+        for x, y in ((8, 2), (3, 8), (13, 8), (8, 14)):
+            painter.drawRoundedRect(x, y, 4, 4, 1.2, 1.2)
+
+        painter.end()
+        return QIcon(pixmap)
+
 
     def __init__(self) -> None:
         super().__init__()
@@ -975,12 +1281,15 @@ class CompilerWindow(QMainWindow):
         self.lexical_analyzer = LexicalAnalyzer()
         self.antlr_syntax_analyzer = AntlrSyntaxAnalyzer()
         self.syntax_analyzer = SyntaxAnalyzer()
+        self.semantic_analyzer = SemanticAnalyzer()
         self.regex_search_service = RegexSearchService()
         self._has_run_result = False
         self._last_run_no_code = False
         self._last_run_tokens: list[Lexeme] = []
         self._last_run_errors = 0
         self._last_run_syntax_errors: list[SyntaxError] = []
+        self._last_run_ast: ProgramNode | None = None
+        self._last_run_ast_text = ""
         self._last_run_lines = 0
         self._last_run_chars = 0
         self._output_history: list[tuple[str, str, dict]] = []
@@ -1129,6 +1438,11 @@ class CompilerWindow(QMainWindow):
         self.action_run.triggered.connect(self.on_run)
         self.action_run.setIcon(QIcon.fromTheme("media-playback-start"))
 
+        self.action_show_ast = QAction(self._build_ast_icon(), tr("show_ast"), self)
+        self.action_show_ast.setShortcut(QKeySequence("Ctrl+Shift+A"))
+        self.action_show_ast.setStatusTip(tr("show_ast"))
+        self.action_show_ast.triggered.connect(self.on_show_ast)
+
         self.action_mode_recursive = QAction(
             tr("analyzer_mode_recursive"), self
         )
@@ -1229,6 +1543,7 @@ class CompilerWindow(QMainWindow):
 
         self.run_menu = menu_bar.addMenu(tr("run_menu"))
         self.run_menu.addAction(self.action_run)
+        self.run_menu.addAction(self.action_show_ast)
         self.run_menu.addSeparator()
         self.analyzer_menu = self.run_menu.addMenu(tr("analyzer_mode_menu"))
         self.analyzer_menu.addAction(self.action_mode_recursive)
@@ -1272,6 +1587,7 @@ class CompilerWindow(QMainWindow):
         toolbar.addAction(self.action_paste)
         toolbar.addSeparator()
         toolbar.addAction(self.action_run)
+        toolbar.addAction(self.action_show_ast)
         toolbar.addSeparator()
 
 
@@ -1650,6 +1966,14 @@ class CompilerWindow(QMainWindow):
             chars=self._last_run_chars,
         )
 
+        if self._last_run_ast_text:
+            self.log("")
+            self.log_tr("ast_output_header")
+            self.log(self._last_run_ast_text)
+        elif not self._last_run_no_code:
+            self.log("")
+            self.log_tr("ast_output_unavailable")
+
         if self._last_run_errors:
             completion_key = "run_done_with_errors"
             completion_kwargs = {"errors": self._last_run_errors}
@@ -1818,6 +2142,18 @@ class CompilerWindow(QMainWindow):
     def on_text_source_code(self) -> None:
         self.log_debug_tr("text_source_code_stub")
 
+    def _lexical_error_to_syntax_error(self, token: Lexeme) -> SyntaxError:
+        return SyntaxError(
+            code=-1,
+            error_type="лексическая ошибка",
+            unexpected_lexeme=token.lexeme,
+            expected="",
+            line=token.line,
+            column_start=token.column_start,
+            column_end=token.column_end,
+            message=token.error_message or token_type_label(-1, True),
+        )
+
 
 
 
@@ -1834,6 +2170,8 @@ class CompilerWindow(QMainWindow):
             self._has_run_result = False
             self._last_run_tokens = []
             self._last_run_syntax_errors = []
+            self._last_run_ast = None
+            self._last_run_ast_text = ""
             self._last_run_errors = 0
             self._last_run_lines = 0
             self._last_run_chars = 0
@@ -1843,19 +2181,44 @@ class CompilerWindow(QMainWindow):
         text = editor.toPlainText()
         self._last_run_no_code = not text.strip()
         self._last_run_tokens = self.lexical_analyzer.analyze(text)
-        
+
+        lexical_errors: list[SyntaxError] = []
+        if self._analyzer_mode == "recursive":
+            lexical_errors = [
+                self._lexical_error_to_syntax_error(token)
+                for token in self._last_run_tokens
+                if token.is_error
+            ]
+
         if self._analyzer_mode == "antlr":
             parse_result = self.antlr_syntax_analyzer.analyze_text(text)
         else:
             parse_result = self.syntax_analyzer.analyze(self._last_run_tokens)
-        self._last_run_syntax_errors = parse_result.errors
-        
+
+        all_errors = lexical_errors + parse_result.errors
+        self._last_run_ast = None
+        self._last_run_ast_text = ""
+
+        if not all_errors and not self._last_run_no_code:
+            semantic_result = self.semantic_analyzer.analyze(self._last_run_tokens)
+            self._last_run_ast = semantic_result.ast
+            self._last_run_ast_text = format_ast_tree(semantic_result.ast)
+            all_errors.extend(semantic_result.errors)
+
+        self._last_run_syntax_errors = all_errors
         self._last_run_errors = len(self._last_run_syntax_errors)
         self._last_run_lines = editor.blockCount()
         self._last_run_chars = len(text)
         self._has_run_result = True
 
         self._render_run_results(update_status=True, focus_results=True)
+
+    def on_show_ast(self) -> None:
+        if self._last_run_ast is None:
+            QMessageBox.information(self, tr("show_ast"), tr("show_ast_no_data"))
+            return
+
+        AstGraphDialog(self._last_run_ast, self).exec()
 
     def _on_error_go_to(self, line: int, col: int) -> None:
         editor = self._current_editor()
@@ -2005,6 +2368,7 @@ class CompilerWindow(QMainWindow):
             "action_references": "references",
             "action_source_code": "source_code",
             "action_run": "run",
+            "action_show_ast": "show_ast",
             "action_mode_recursive": "analyzer_mode_recursive",
             "action_mode_antlr": "analyzer_mode_antlr",
             "action_find": "search_run",
