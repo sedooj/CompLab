@@ -548,131 +548,73 @@ class SemanticAnalyzer:
 
 
 def format_ast_tree(root: ProgramNode | None) -> str:
-    if root is None:
+    if root is None or not root.declarations:
         return "<AST is empty>"
 
-    def node_label(node: AstNode) -> str:
-        if isinstance(node, ProgramNode):
-            return "PROGRAM"
-        if isinstance(node, ValDeclNode):
-            return "VAL DECLARATION"
-        if isinstance(node, LambdaNode):
-            return "LAMBDA EXPRESSION"
-        if isinstance(node, FunctionTypeNode):
-            return "FUNCTION TYPE"
-        if isinstance(node, TypeNode):
-            return node.name
-        if isinstance(node, ParamNode):
-            return f"{node.name}: {node.inferred_type}"
-        if isinstance(node, BinaryOpNode):
-            return f"OPERATOR: {node.operator}"
-        if isinstance(node, IdentifierNode):
-            return f"ID: {node.name}"
-        if isinstance(node, IntLiteralNode):
-            return f"VALUE: {node.value}"
-        return node.__class__.__name__
+    lines: list[str] = ["LAMBDA EXPRESSION"]
 
-    def children_for(node: AstNode) -> list[tuple[str | None, AstNode | str]]:
-        if isinstance(node, ProgramNode):
-            return [(None, decl) for decl in node.declarations]
+    def add(prefix: str, is_last: bool, text: str) -> None:
+        branch = "└──" if is_last else "├──"
+        lines.append(f"{prefix}{branch} {text}")
 
-        if isinstance(node, ValDeclNode):
-            entries: list[tuple[str | None, AstNode | str]] = [
-                (None, f"ID: {node.name}"),
-            ]
-            if node.value is not None:
-                if node.value.params:
-                    entries.append(
-                        (
-                            None,
-                            AstNodeList(
-                                f"PARAMETERS ({len(node.value.params)})",
-                                [f"{param.name}: {param.inferred_type}" for param in node.value.params],
-                            ),
-                        )
-                    )
-                if node.function_type is not None and node.function_type.param_types:
-                    entries.append(
-                        (
-                            None,
-                            AstNodeList(
-                                f"ARG TYPES ({len(node.function_type.param_types)})",
-                                [type_node.name for type_node in node.function_type.param_types],
-                            ),
-                        )
-                    )
-                if node.function_type is not None and node.function_type.return_type is not None:
-                    entries.append((None, f"RETURNS: {node.function_type.return_type.name}"))
-                if node.value.body is not None:
-                    entries.append((None, AstNodeList("BODY", [node.value.body])))
-            return entries
+    def child_prefix(prefix: str, is_last: bool) -> str:
+        return prefix + ("    " if is_last else "│   ")
 
-        if isinstance(node, LambdaNode):
-            entries: list[tuple[str | None, AstNode | str]] = []
-            if node.params:
-                entries.append((None, AstNodeList(f"PARAMETERS ({len(node.params)})", list(node.params))))
-            if node.body is not None:
-                entries.append((None, AstNodeList("BODY", [node.body])))
-            return entries
-
-        if isinstance(node, BinaryOpNode):
-            return [(None, node.left), (None, node.right)]
-
-        return []
-
-    @dataclass(slots=True)
-    class AstNodeList:
-        label: str
-        values: list[AstNode | str]
-
-    lines = [node_label(root)]
-
-    def render(node: AstNode | str | AstNodeList, prefix: str) -> None:
-        if isinstance(node, str):
-            lines.append(f"{prefix}{node}")
+    def render_expr(expr: ExprNode | None, prefix: str, is_last: bool) -> None:
+        if expr is None:
+            add(prefix, is_last, "<empty>")
             return
 
-        if isinstance(node, AstNodeList):
-            lines.append(f"{prefix}{node.label}")
-            child_prefix = prefix + "    "
-            for idx, value in enumerate(node.values):
-                branch = "└──" if idx == len(node.values) - 1 else "├──"
-                if isinstance(value, str):
-                    lines.append(f"{child_prefix}{branch} {value}")
-                else:
-                    lines.append(f"{child_prefix}{branch} {node_label(value)}")
-                    render_children(value, child_prefix + ("    " if idx == len(node.values) - 1 else "│   "))
+        if isinstance(expr, BinaryOpNode):
+            add(prefix, is_last, f'operation: "{expr.operator}"')
+            expr_prefix = child_prefix(prefix, is_last)
+            render_expr(expr.left, expr_prefix, False)
+            render_expr(expr.right, expr_prefix, True)
             return
 
-        render_children(node, prefix)
+        if isinstance(expr, IdentifierNode):
+            add(prefix, is_last, f'id: "{expr.name}"')
+            return
 
-    def render_children(node: AstNode, prefix: str) -> None:
-        entries = children_for(node)
-        for idx, (label, value) in enumerate(entries):
-            is_last = idx == len(entries) - 1
-            branch = "└──" if is_last else "├──"
+        if isinstance(expr, IntLiteralNode):
+            add(prefix, is_last, f"literal: {expr.value}")
+            return
 
-            if isinstance(value, str):
-                text = f"{label}: {value}" if label else value
-                lines.append(f"{prefix}{branch} {text}")
-                continue
+        add(prefix, is_last, expr.__class__.__name__)
 
-            if isinstance(value, AstNodeList):
-                lines.append(f"{prefix}{branch} {value.label}")
-                child_prefix = prefix + ("    " if is_last else "│   ")
-                for jdx, child_value in enumerate(value.values):
-                    child_branch = "└──" if jdx == len(value.values) - 1 else "├──"
-                    if isinstance(child_value, str):
-                        lines.append(f"{child_prefix}{child_branch} {child_value}")
-                    else:
-                        lines.append(f"{child_prefix}{child_branch} {node_label(child_value)}")
-                        render_children(child_value, child_prefix + ("    " if jdx == len(value.values) - 1 else "│   "))
-                continue
+    def render_decl(decl: ValDeclNode, prefix: str, is_last: bool) -> None:
+        add(prefix, is_last, f'val: "{decl.name}"')
+        decl_prefix = child_prefix(prefix, is_last)
 
-            text = f"{label}: {node_label(value)}" if label else node_label(value)
-            lines.append(f"{prefix}{branch} {text}")
-            child_prefix = prefix + ("    " if is_last else "│   ")
-            render_children(value, child_prefix)
+        if decl.value is None:
+            add(decl_prefix, True, "value: <empty>")
+            return
 
-    render_children(root, "")
+        add(decl_prefix, True, "value: LambdaNode")
+        value_prefix = child_prefix(decl_prefix, True)
+
+        return_type = "Unknown"
+        if decl.function_type is not None and decl.function_type.return_type is not None:
+            return_type = decl.function_type.return_type.name
+        add(value_prefix, False, f'returnType: "{return_type}"')
+
+        params = decl.value.params
+        add(value_prefix, False, "parameters:")
+        params_prefix = child_prefix(value_prefix, False)
+        if not params:
+            add(params_prefix, True, "<empty>")
+        for idx, param in enumerate(params):
+            param_is_last = idx == len(params) - 1
+            add(params_prefix, param_is_last, f'param: "{param.name}"')
+            one_param_prefix = child_prefix(params_prefix, param_is_last)
+            add(one_param_prefix, True, f'type: "{param.inferred_type}"')
+
+        add(value_prefix, True, "body:")
+        body_prefix = child_prefix(value_prefix, True)
+        render_expr(decl.value.body, body_prefix, True)
+
+    declarations = root.declarations
+    for idx, declaration in enumerate(declarations):
+        render_decl(declaration, "", idx == len(declarations) - 1)
+
     return "\n".join(lines)
